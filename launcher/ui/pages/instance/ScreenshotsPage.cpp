@@ -36,7 +36,6 @@
  */
 
 #include "ScreenshotsPage.h"
-#include "BuildConfig.h"
 #include "ui_ScreenshotsPage.h"
 
 #include <QModelIndex>
@@ -97,30 +96,37 @@ public:
             return;
         if ((info.suffix().compare("png", Qt::CaseInsensitive) != 0))
             return;
-        if (!m_cache->stale(m_path))
-            return;
-        QImage image(m_path);
-        if (image.isNull()) {
-            m_resultEmitter.emitResultsFailed(m_path);
-            qDebug() << "Error loading screenshot: " + m_path + ". Perhaps too large?";
+        int tries = 5;
+        while (tries)
+        {
+            if (!m_cache->stale(m_path))
+                return;
+            QImage image(m_path);
+            if (image.isNull())
+            {
+                QThread::msleep(500);
+                tries--;
+                continue;
+            }
+            QImage small;
+            if (image.width() > image.height())
+                small = image.scaledToWidth(512).scaledToWidth(256, Qt::SmoothTransformation);
+            else
+                small = image.scaledToHeight(512).scaledToHeight(256, Qt::SmoothTransformation);
+            QPoint offset((256 - small.width()) / 2, (256 - small.height()) / 2);
+            QImage square(QSize(256, 256), QImage::Format_ARGB32);
+            square.fill(Qt::transparent);
+
+            QPainter painter(&square);
+            painter.drawImage(offset, small);
+            painter.end();
+
+            QIcon icon(QPixmap::fromImage(square));
+            m_cache->add(m_path, icon);
+            m_resultEmitter.emitResultsReady(m_path);
             return;
         }
-        QImage small;
-        if (image.width() > image.height())
-            small = image.scaledToWidth(512).scaledToWidth(256, Qt::SmoothTransformation);
-        else
-            small = image.scaledToHeight(512).scaledToHeight(256, Qt::SmoothTransformation);
-        QPoint offset((256 - small.width()) / 2, (256 - small.height()) / 2);
-        QImage square(QSize(256, 256), QImage::Format_ARGB32);
-        square.fill(Qt::transparent);
-
-        QPainter painter(&square);
-        painter.drawImage(offset, small);
-        painter.end();
-
-        QIcon icon(QPixmap::fromImage(square));
-        m_cache->add(m_path, icon);
-        m_resultEmitter.emitResultsReady(m_path);
+        m_resultEmitter.emitResultsFailed(m_path);
     }
     QString m_path;
     SharedIconCachePtr m_cache;
@@ -139,12 +145,9 @@ public:
         m_thumbnailCache = std::make_shared<SharedIconCache>();
         m_thumbnailCache->add("placeholder", APPLICATION->getThemedIcon("screenshot-placeholder"));
         connect(&watcher, SIGNAL(fileChanged(QString)), SLOT(fileChanged(QString)));
+        // FIXME: the watched file set is not updated when files are removed
     }
-    virtual ~FilterModel() {
-        m_thumbnailingPool.clear();
-        if (!m_thumbnailingPool.waitForDone(500))
-            qDebug() << "Thumbnail pool took longer than 500ms to finish";
-    }
+    virtual ~FilterModel() { m_thumbnailingPool.waitForDone(500); }
     virtual QVariant data(const QModelIndex &proxyIndex, int role = Qt::DisplayRole) const
     {
         auto model = sourceModel();
@@ -211,12 +214,10 @@ private slots:
     void fileChanged(QString filepath)
     {
         m_thumbnailCache->setStale(filepath);
+        thumbnailImage(filepath);
         // reinsert the path...
         watcher.removePath(filepath);
-        if (QFile::exists(filepath)) {
-            watcher.addPath(filepath);
-            thumbnailImage(filepath);
-        }
+        watcher.addPath(filepath);
     }
 
 private:
@@ -379,18 +380,16 @@ void ScreenshotsPage::on_actionUpload_triggered()
     if (selection.isEmpty())
         return;
 
+
     QString text;
-    QUrl baseUrl(BuildConfig.IMGUR_BASE_URL);
     if (selection.size() > 1)
-        text = tr("You are about to upload %1 screenshots to %2.\n"
-                  "You should double-check for personal information.\n\n"
+        text = tr("You are about to upload %1 screenshots.\n\n"
                   "Are you sure?")
-                   .arg(QString::number(selection.size()), baseUrl.host());
+                   .arg(selection.size());
     else
-        text = tr("You are about to upload the selected screenshot to %1.\n"
-                  "You should double-check for personal information.\n\n"
-                  "Are you sure?")
-                   .arg(baseUrl.host());
+        text =
+            tr("You are about to upload the selected screenshot.\n\n"
+               "Are you sure?");
 
     auto response = CustomMessageBox::selectable(this, "Confirm Upload", text, QMessageBox::Warning, QMessageBox::Yes | QMessageBox::No,
                                                  QMessageBox::No)

@@ -104,5 +104,5 @@ private:
     QString selectedVersion;
 
     NetJob::Ptr jobPtr;
-    std::shared_ptr<QByteArray> response = std::make_shared<QByteArray>();
+    QByteArray response;
 };

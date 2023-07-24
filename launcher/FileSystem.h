@@ -43,7 +43,6 @@
 #include <system_error>
 
 #include <QDir>
-#include <QPair>
 #include <QFlags>
 #include <QLocalServer>
 #include <QObject>
@@ -113,12 +112,9 @@ class copy : public QObject {
     bool operator()(bool dryRun = false) { return operator()(QString(), dryRun); }
 
     int totalCopied() { return m_copied; }
-    int totalFailed() { return m_failedPaths.length(); }
-    QStringList failed() { return m_failedPaths; }
 
    signals:
     void fileCopied(const QString& relativeName);
-    void copyFailed(const QString& relativeName);
     // TODO: maybe add a "shouldCopy" signal in the future?
 
    private:
@@ -131,7 +127,6 @@ class copy : public QObject {
     QDir m_src;
     QDir m_dst;
     int m_copied;
-    QStringList m_failedPaths;
 };
 
 struct LinkPair {
@@ -476,9 +471,6 @@ class clone : public QObject {
     bool operator()(bool dryRun = false) { return operator()(QString(), dryRun); }
 
     int totalCloned() { return m_cloned; }
-    int totalFailed() { return m_failedClones.length(); }
-
-    QList<QPair<QString, QString>> failed() { return m_failedClones; }
 
    signals:
     void fileCloned(const QString& src, const QString& dst);
@@ -493,7 +485,6 @@ class clone : public QObject {
     QDir m_src;
     QDir m_dst;
     int m_cloned;
-    QList<QPair<QString, QString>> m_failedClones;
 };
 
 /**

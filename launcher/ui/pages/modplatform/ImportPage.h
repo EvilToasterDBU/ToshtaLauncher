@@ -57,7 +57,7 @@ public:
     virtual ~ImportPage();
     virtual QString displayName() const override
     {
-        return tr("Import");
+        return tr("Import from zip");
     }
     virtual QIcon icon() const override
     {

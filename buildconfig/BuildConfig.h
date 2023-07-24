@@ -68,7 +68,7 @@ class Config {
 
     bool UPDATER_ENABLED = false;
 
-    /// A short string identifying this build's platform or distribution.
+    /// A short string identifying this build's platform. For example, "lin64" or "win32".
     QString BUILD_PLATFORM;
 
     /// A string containing the build timestamp
@@ -128,6 +128,11 @@ class Config {
      * Client API key for CurseForge
      */
     QString FLAME_API_KEY;
+
+    /**
+     * Modrinth Token
+     */
+    QString MODRINTH_TOKEN;
 
     /**
      * Metadata repository URL prefix

@@ -33,8 +33,8 @@
  *      limitations under the License.
  */
 
-#include "CustomPage.h"
-#include "ui_CustomPage.h"
+#include "VanillaPage.h"
+#include "ui_VanillaPage.h"
 
 #include <QTabBar>
 
@@ -46,32 +46,32 @@
 #include "minecraft/VanillaInstanceCreationTask.h"
 #include "ui/dialogs/NewInstanceDialog.h"
 
-CustomPage::CustomPage(NewInstanceDialog *dialog, QWidget *parent)
-    : QWidget(parent), dialog(dialog), ui(new Ui::CustomPage)
+VanillaPage::VanillaPage(NewInstanceDialog *dialog, QWidget *parent)
+    : QWidget(parent), dialog(dialog), ui(new Ui::VanillaPage)
 {
     ui->setupUi(this);
     ui->tabWidget->tabBar()->hide();
-    connect(ui->versionList, &VersionSelectWidget::selectedVersionChanged, this, &CustomPage::setSelectedVersion);
+    connect(ui->versionList, &VersionSelectWidget::selectedVersionChanged, this, &VanillaPage::setSelectedVersion);
     filterChanged();
-    connect(ui->alphaFilter, &QCheckBox::stateChanged, this, &CustomPage::filterChanged);
-    connect(ui->betaFilter, &QCheckBox::stateChanged, this, &CustomPage::filterChanged);
-    connect(ui->snapshotFilter, &QCheckBox::stateChanged, this, &CustomPage::filterChanged);
-    connect(ui->oldSnapshotFilter, &QCheckBox::stateChanged, this, &CustomPage::filterChanged);
-    connect(ui->releaseFilter, &QCheckBox::stateChanged, this, &CustomPage::filterChanged);
-    connect(ui->experimentsFilter, &QCheckBox::stateChanged, this, &CustomPage::filterChanged);
-    connect(ui->refreshBtn, &QPushButton::clicked, this, &CustomPage::refresh);
+    connect(ui->alphaFilter, &QCheckBox::stateChanged, this, &VanillaPage::filterChanged);
+    connect(ui->betaFilter, &QCheckBox::stateChanged, this, &VanillaPage::filterChanged);
+    connect(ui->snapshotFilter, &QCheckBox::stateChanged, this, &VanillaPage::filterChanged);
+    connect(ui->oldSnapshotFilter, &QCheckBox::stateChanged, this, &VanillaPage::filterChanged);
+    connect(ui->releaseFilter, &QCheckBox::stateChanged, this, &VanillaPage::filterChanged);
+    connect(ui->experimentsFilter, &QCheckBox::stateChanged, this, &VanillaPage::filterChanged);
+    connect(ui->refreshBtn, &QPushButton::clicked, this, &VanillaPage::refresh);
 
-    connect(ui->loaderVersionList, &VersionSelectWidget::selectedVersionChanged, this, &CustomPage::setSelectedLoaderVersion);
-    connect(ui->noneFilter, &QRadioButton::toggled, this, &CustomPage::loaderFilterChanged);
-    connect(ui->forgeFilter, &QRadioButton::toggled, this, &CustomPage::loaderFilterChanged);
-    connect(ui->fabricFilter, &QRadioButton::toggled, this, &CustomPage::loaderFilterChanged);
-    connect(ui->quiltFilter, &QRadioButton::toggled, this, &CustomPage::loaderFilterChanged);
-    connect(ui->liteLoaderFilter, &QRadioButton::toggled, this, &CustomPage::loaderFilterChanged);
-    connect(ui->loaderRefreshBtn, &QPushButton::clicked, this, &CustomPage::loaderRefresh);
+    connect(ui->loaderVersionList, &VersionSelectWidget::selectedVersionChanged, this, &VanillaPage::setSelectedLoaderVersion);
+    connect(ui->noneFilter, &QRadioButton::toggled, this, &VanillaPage::loaderFilterChanged);
+    connect(ui->forgeFilter, &QRadioButton::toggled, this, &VanillaPage::loaderFilterChanged);
+    connect(ui->fabricFilter, &QRadioButton::toggled, this, &VanillaPage::loaderFilterChanged);
+    connect(ui->quiltFilter, &QRadioButton::toggled, this, &VanillaPage::loaderFilterChanged);
+    connect(ui->liteLoaderFilter, &QRadioButton::toggled, this, &VanillaPage::loaderFilterChanged);
+    connect(ui->loaderRefreshBtn, &QPushButton::clicked, this, &VanillaPage::loaderRefresh);
 
 }
 
-void CustomPage::openedImpl()
+void VanillaPage::openedImpl()
 {
     if(!initialized)
     {
@@ -85,19 +85,19 @@ void CustomPage::openedImpl()
     }
 }
 
-void CustomPage::refresh()
+void VanillaPage::refresh()
 {
     ui->versionList->loadList();
 }
 
-void CustomPage::loaderRefresh()
+void VanillaPage::loaderRefresh()
 {
     if(ui->noneFilter->isChecked())
         return;
     ui->loaderVersionList->loadList();
 }
 
-void CustomPage::filterChanged()
+void VanillaPage::filterChanged()
 {
     QStringList out;
     if(ui->alphaFilter->isChecked())
@@ -116,7 +116,7 @@ void CustomPage::filterChanged()
     ui->versionList->setFilter(BaseVersionList::TypeRole, new RegexpFilter(regexp, false));
 }
 
-void CustomPage::loaderFilterChanged()
+void VanillaPage::loaderFilterChanged()
 {
     QString minecraftVersion;
     if (m_selectedVersion)
@@ -172,37 +172,37 @@ void CustomPage::loaderFilterChanged()
     ui->loaderVersionList->setEmptyString(tr("No versions are currently available for Minecraft %1").arg(minecraftVersion));
 }
 
-CustomPage::~CustomPage()
+VanillaPage::~VanillaPage()
 {
     delete ui;
 }
 
-bool CustomPage::shouldDisplay() const
+bool VanillaPage::shouldDisplay() const
 {
     return true;
 }
 
-void CustomPage::retranslate()
+void VanillaPage::retranslate()
 {
     ui->retranslateUi(this);
 }
 
-BaseVersion::Ptr CustomPage::selectedVersion() const
+BaseVersion::Ptr VanillaPage::selectedVersion() const
 {
     return m_selectedVersion;
 }
 
-BaseVersion::Ptr CustomPage::selectedLoaderVersion() const
+BaseVersion::Ptr VanillaPage::selectedLoaderVersion() const
 {
     return m_selectedLoaderVersion;
 }
 
-QString CustomPage::selectedLoader() const
+QString VanillaPage::selectedLoader() const
 {
     return m_selectedLoader;
 }
 
-void CustomPage::suggestCurrent()
+void VanillaPage::suggestCurrent()
 {
     if (!isOpened)
     {
@@ -227,14 +227,14 @@ void CustomPage::suggestCurrent()
     dialog->setSuggestedIcon("default");
 }
 
-void CustomPage::setSelectedVersion(BaseVersion::Ptr version)
+void VanillaPage::setSelectedVersion(BaseVersion::Ptr version)
 {
     m_selectedVersion = version;
     suggestCurrent();
     loaderFilterChanged();
 }
 
-void CustomPage::setSelectedLoaderVersion(BaseVersion::Ptr version)
+void VanillaPage::setSelectedLoaderVersion(BaseVersion::Ptr version)
 {
     m_selectedLoaderVersion = version;
     suggestCurrent();

@@ -8,7 +8,6 @@
 namespace Hashing {
 
 class Hasher : public Task {
-    Q_OBJECT
    public:
     using Ptr = shared_qobject_ptr<Hasher>;
 
@@ -21,9 +20,6 @@ class Hasher : public Task {
 
     QString getResult() const { return m_hash; };
     QString getPath() const { return m_path; };
-
-   signals:
-    void resultsReady(QString hash);
 
    protected:
     QString m_hash;
@@ -52,7 +48,6 @@ class BlockedModHasher : public Hasher {
 
     QStringList getHashTypes();
     bool useHashType(QString type);
-
    private:
     ModPlatform::ResourceProvider provider;
     QString hash_type;

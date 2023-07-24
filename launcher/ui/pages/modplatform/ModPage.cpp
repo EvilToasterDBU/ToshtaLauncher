@@ -89,13 +89,17 @@ void ModPage::filterMods()
 
 void ModPage::triggerSearch()
 {
+    auto changed = m_filter_widget->changed();
     m_filter = m_filter_widget->getFilter();
-    m_ui->packView->clearSelection();
-    m_ui->packDescription->clear();
-    m_ui->versionSelectionBox->clear();
-    updateSelectionButton();
 
-    static_cast<ModModel*>(m_model)->searchWithTerm(getSearchTerm(), m_ui->sortByBox->currentData().toUInt(), m_filter_widget->changed());
+    if (changed) {
+        m_ui->packView->clearSelection();
+        m_ui->packDescription->clear();
+        m_ui->versionSelectionBox->clear();
+        updateSelectionButton();
+    }
+
+    static_cast<ModModel*>(m_model)->searchWithTerm(getSearchTerm(), m_ui->sortByBox->currentData().toUInt(), changed);
     m_fetch_progress.watch(m_model->activeSearchJob().get());
 }
 
@@ -118,8 +122,6 @@ void ModPage::updateVersionList()
     QString mcVersion = packProfile->getComponentVersion("net.minecraft");
 
     auto current_pack = getCurrentPack();
-    if (!current_pack)
-        return;
     for (int i = 0; i < current_pack->versions.size(); i++) {
         auto version = current_pack->versions[i];
         bool valid = false;

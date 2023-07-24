@@ -159,6 +159,19 @@ void AccountListPage::on_actionAddMojang_triggered()
 
 void AccountListPage::on_actionAddMicrosoft_triggered()
 {
+    if(BuildConfig.BUILD_PLATFORM == "osx64") {
+        CustomMessageBox::selectable(
+            this,
+            tr("Microsoft Accounts not available"),
+            //: %1 refers to the launcher itself
+            tr(
+                "Microsoft accounts are only usable on macOS 10.13 or newer, with fully updated %1.\n\n"
+                "Please update both your operating system and %1."
+            ).arg(BuildConfig.LAUNCHER_DISPLAYNAME),
+            QMessageBox::Warning
+        )->exec();
+        return;
+    }
     MinecraftAccountPtr account = MSALoginDialog::newAccount(
         this,
         tr("Please enter your Mojang account email and password to add your account.")
@@ -175,19 +188,6 @@ void AccountListPage::on_actionAddMicrosoft_triggered()
 
 void AccountListPage::on_actionAddOffline_triggered()
 {
-    if (!m_accounts->anyAccountIsValid()) {
-        QMessageBox::warning(
-            this,
-            tr("Error"),
-            tr(
-                "You must add a Microsoft or Mojang account that owns Minecraft before you can add an offline account."
-                "<br><br>"
-                "If you have lost your account you can contact Microsoft for support."
-            )
-        );
-        return;
-    }
-
     MinecraftAccountPtr account = OfflineLoginDialog::newAccount(
         this,
         tr("Please enter your desired username to add your offline account.")
