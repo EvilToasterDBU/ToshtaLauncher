@@ -107,7 +107,7 @@ Config::Config()
     IMGUR_CLIENT_ID = "@Launcher_IMGUR_CLIENT_ID@";
     MSA_CLIENT_ID = "@Launcher_MSA_CLIENT_ID@";
     FLAME_API_KEY = "@Launcher_CURSEFORGE_API_KEY@";
-    MODRINTH_TOKEN = "@Launcher_MODRINTH_TOKEN@"
+    MODRINTH_TOKEN = "@Launcher_MODRINTH_TOKEN@";
     META_URL = "@Launcher_META_URL@";
 
     BUG_TRACKER_URL = "@Launcher_BUG_TRACKER_URL@";
