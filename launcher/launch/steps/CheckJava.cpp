@@ -81,20 +81,15 @@ void CheckJava::executeTask()
     }
 
     QFileInfo javaInfo(realJavaPath);
-    qint64 javaUnixTime = javaInfo.lastModified().toMSecsSinceEpoch();
-    auto storedSignature = settings->get("JavaSignature").toString();
+    qlonglong javaUnixTime = javaInfo.lastModified().toMSecsSinceEpoch();
+    auto storedUnixTime = settings->get("JavaTimestamp").toLongLong();
     auto storedArchitecture = settings->get("JavaArchitecture").toString();
     auto storedRealArchitecture = settings->get("JavaRealArchitecture").toString();
     auto storedVersion = settings->get("JavaVersion").toString();
     auto storedVendor = settings->get("JavaVendor").toString();
-
-    QCryptographicHash hash(QCryptographicHash::Sha1);
-    hash.addData(QByteArray::number(javaUnixTime));
-    hash.addData(m_javaPath.toUtf8());
-    m_javaSignature = hash.result().toHex();
-
+    m_javaUnixTime = javaUnixTime;
     // if timestamps are not the same, or something is missing, check!
-    if (m_javaSignature != storedSignature || storedVersion.size() == 0
+    if (javaUnixTime != storedUnixTime || storedVersion.size() == 0
         || storedArchitecture.size() == 0 || storedRealArchitecture.size() == 0
         || storedVendor.size() == 0)
     {
@@ -145,7 +140,7 @@ void CheckJava::checkJavaFinished(JavaCheckResult result)
             instance->settings()->set("JavaArchitecture", result.mojangPlatform);
             instance->settings()->set("JavaRealArchitecture", result.realPlatform);
             instance->settings()->set("JavaVendor", result.javaVendor);
-            instance->settings()->set("JavaSignature", m_javaSignature);
+            instance->settings()->set("JavaTimestamp", m_javaUnixTime);
             emitSucceeded();
             return;
         }

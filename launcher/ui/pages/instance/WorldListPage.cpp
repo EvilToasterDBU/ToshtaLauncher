@@ -339,7 +339,6 @@ void WorldListPage::mceditState(LoggedProcess::State state)
         {
             failed = true;
         }
-        /* fallthrough */
         case LoggedProcess::Running:
         case LoggedProcess::Finished:
         {

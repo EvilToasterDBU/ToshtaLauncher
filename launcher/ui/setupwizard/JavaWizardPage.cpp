@@ -69,7 +69,6 @@ bool JavaWizardPage::validatePage()
         case JavaSettingsWidget::ValidationStatus::AllOK:
         {
             settings->set("JavaPath", m_java_widget->javaPath());
-            return true;
         }
         case JavaSettingsWidget::ValidationStatus::JavaBad:
         {

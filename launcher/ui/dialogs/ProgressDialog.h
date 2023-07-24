@@ -62,7 +62,7 @@ public:
     explicit ProgressDialog(QWidget *parent = 0);
     ~ProgressDialog();
 
-    void updateSize(bool recenterParent = false);
+    void updateSize();
 
     int execWithTask(Task* task);
     int execWithTask(std::unique_ptr<Task> &&task);

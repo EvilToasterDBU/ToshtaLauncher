@@ -92,7 +92,7 @@ class Resource : public QObject {
     }
 
     // Delete all files of this resource.
-    bool destroy(bool attemptTrash = true);
+    bool destroy();
 
     [[nodiscard]] auto isSymLink() const -> bool { return m_file_info.isSymLink(); }
 

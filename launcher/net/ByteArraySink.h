@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 /*
- *  Prism Launcher - Minecraft Launcher
+ *  PolyMC - Minecraft Launcher
  *  Copyright (c) 2022 flowln <flowlnlnln@gmail.com>
- *  Copyright (c) 2023 Trial97 <alexandru.tripon97@gmail.com>
  *
  *  This program is free software: you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -47,7 +46,7 @@ namespace Net {
  */
 class ByteArraySink : public Sink {
    public:
-    ByteArraySink(std::shared_ptr<QByteArray> output) : m_output(output){};
+    ByteArraySink(QByteArray* output) : m_output(output){};
 
     virtual ~ByteArraySink() = default;
 
@@ -94,6 +93,6 @@ class ByteArraySink : public Sink {
     auto hasLocalData() -> bool override { return false; }
 
    private:
-    std::shared_ptr<QByteArray> m_output;
+    QByteArray* m_output;
 };
 }  // namespace Net

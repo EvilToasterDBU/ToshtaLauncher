@@ -187,24 +187,35 @@ QVariant VersionProxyModel::data(const QModelIndex &index, int role) const
         }
         case Qt::ToolTipRole:
         {
-            if(column == Name && hasRecommended) 
+            switch(column)
             {
-                auto value = sourceModel()->data(parentIndex, BaseVersionList::RecommendedRole);
-                if(value.toBool())
+                case Name:
                 {
-                    return tr("Recommended");
-                } else if(hasLatest) {
-                    auto value = sourceModel()->data(parentIndex, BaseVersionList::LatestRole);
-                    if(value.toBool())
+                    if(hasRecommended)
                     {
-                        return tr("Latest");
+                        auto value = sourceModel()->data(parentIndex, BaseVersionList::RecommendedRole);
+                        if(value.toBool())
+                        {
+                            return tr("Recommended");
+                        }
+                        else if(hasLatest)
+                        {
+                            auto value = sourceModel()->data(parentIndex, BaseVersionList::LatestRole);
+                            if(value.toBool())
+                            {
+                                return tr("Latest");
+                            }
+                        }
+                        else if(index.row() == 0)
+                        {
+                            return tr("Latest");
+                        }
                     }
-                } else if(index.row() == 0)
-                {
-                    return tr("Latest");
                 }
-            } else {
-                return sourceModel()->data(parentIndex, BaseVersionList::VersionIdRole);
+                default:
+                {
+                    return sourceModel()->data(parentIndex, BaseVersionList::VersionIdRole);
+                }
             }
         }
         case Qt::DecorationRole:

@@ -110,9 +110,9 @@ class ModpackListModel : public QAbstractListModel {
 
     NetJob::Ptr jobPtr;
 
-    std::shared_ptr<QByteArray> m_all_response = std::make_shared<QByteArray>();
+    QByteArray m_all_response;
     QByteArray m_specific_response;
 
     int m_modpacks_per_page = 20;
 };
-}  // namespace Modrinth
+}  // namespace ModPlatform

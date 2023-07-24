@@ -224,13 +224,6 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
         // disabled until we have an instance selected
         ui->instanceToolBar->setEnabled(false);
         setInstanceActionsEnabled(false);
-
-        // add a close button at the end of the main toolbar when running on gamescope / steam deck
-        // FIXME: detect if we don't have server side decorations instead
-        if (qgetenv("XDG_CURRENT_DESKTOP") == "gamescope") {
-            ui->mainToolBar->addAction(ui->actionCloseWindow);
-        }
-
     }
 
     // add the toolbar toggles to the view menu
@@ -927,8 +920,21 @@ void MainWindow::onCatToggled(bool state)
 
 void MainWindow::setCatBackground(bool enabled)
 {
-    view->setPaintCat(enabled);
-    view->viewport()->repaint();
+    if (enabled) {
+        view->setStyleSheet(QString(R"(
+InstanceView
+{
+    background-image: url(:/backgrounds/%1);
+    background-attachment: fixed;
+    background-clip: padding;
+    background-position: bottom right;
+    background-repeat: none;
+    background-color:palette(base);
+})")
+                                .arg(ThemeManager::getCatImage()));
+    } else {
+        view->setStyleSheet(QString());
+    }
 }
 
 void MainWindow::runModalTask(Task *task)
@@ -1279,17 +1285,7 @@ void MainWindow::globalSettingsClosed()
 
 void MainWindow::on_actionEditInstance_triggered()
 {
-
-    if (!m_selectedInstance)
-        return;
-
-    if (m_selectedInstance->canEdit()) {
-        APPLICATION->showInstanceWindow(m_selectedInstance);
-    } else  {
-        CustomMessageBox::selectable(this, tr("Instance not editable"), 
-                                     tr("This instance is not editable. It may be broken, invalid, or too old. Check logs for details."),
-                                     QMessageBox::Critical)->show();
-    }
+    APPLICATION->showInstanceWindow(m_selectedInstance);
 }
 
 void MainWindow::on_actionManageAccounts_triggered()
@@ -1507,113 +1503,140 @@ void MainWindow::on_actionKillInstance_triggered()
 
 void MainWindow::on_actionCreateInstanceShortcut_triggered()
 {
-    if (!m_selectedInstance)
-        return;
-    auto desktopPath = FS::getDesktopDir();
-    if (desktopPath.isEmpty()) {
-        // TODO come up with an alternative solution (open "save file" dialog)
-        QMessageBox::critical(this, tr("Create instance shortcut"), tr("Couldn't find desktop?!"));
-        return;
-    }
-
-    QString desktopFilePath;
-    QString appPath = QApplication::applicationFilePath();
-    QString iconPath;
-    QStringList args;
-#if defined(Q_OS_MACOS)
-    if (appPath.startsWith("/private/var/")) {
-        QMessageBox::critical(this, tr("Create instance shortcut"),
-                              tr("The launcher is in the folder it was extracted from, therefore it cannot create shortcuts."));
-        return;
-    }
-#elif defined(Q_OS_LINUX) || defined(Q_OS_FREEBSD) || defined(Q_OS_OPENBSD)
-    if (appPath.startsWith("/tmp/.mount_")) {
-        // AppImage!
-        appPath = QProcessEnvironment::systemEnvironment().value(QStringLiteral("APPIMAGE"));
-        if (appPath.isEmpty()) {
-            QMessageBox::critical(this, tr("Create instance shortcut"),
-                                  tr("Launcher is running as misconfigured AppImage? ($APPIMAGE environment variable is missing)"));
-        } else if (appPath.endsWith("/")) {
-            appPath.chop(1);
+    if (m_selectedInstance)
+    {
+        auto desktopPath = FS::getDesktopDir();
+        if (desktopPath.isEmpty()) {
+            // TODO come up with an alternative solution (open "save file" dialog)
+            QMessageBox::critical(this, tr("Create instance shortcut"), tr("Couldn't find desktop?!"));
+            return;
         }
-    }
 
-    auto icon = APPLICATION->icons()->icon(m_selectedInstance->iconKey());
-    if (icon == nullptr) {
-        icon = APPLICATION->icons()->icon("grass");
-    }
+#if defined(Q_OS_MACOS)
+        QString appPath = QApplication::applicationFilePath();
+        if (appPath.startsWith("/private/var/")) {
+            QMessageBox::critical(this, tr("Create instance shortcut"), tr("The launcher is in the folder it was extracted from, therefore it cannot create shortcuts."));
+            return;
+        }
 
-    iconPath = FS::PathCombine(m_selectedInstance->instanceRoot(), "icon.png");
+        if (FS::createShortcut(FS::PathCombine(desktopPath, m_selectedInstance->name()),
+                           appPath, { "--launch", m_selectedInstance->id() },
+                           m_selectedInstance->name(), "")) {
+            QMessageBox::information(this, tr("Create instance shortcut"), tr("Created a shortcut to this instance on your desktop!"));
+        }
+        else
+        {
+            QMessageBox::critical(this, tr("Create instance shortcut"), tr("Failed to create instance shortcut!"));
+        }
+#elif defined(Q_OS_LINUX) || defined(Q_OS_FREEBSD) || defined(Q_OS_OPENBSD)
+        QString appPath = QApplication::applicationFilePath();
+        if (appPath.startsWith("/tmp/.mount_")) {
+            // AppImage!
+            appPath = QProcessEnvironment::systemEnvironment().value(QStringLiteral("APPIMAGE"));
+            if (appPath.isEmpty())
+            {
+                QMessageBox::critical(this, tr("Create instance shortcut"), tr("Launcher is running as misconfigured AppImage? ($APPIMAGE environment variable is missing)"));
+            }
+            else if (appPath.endsWith("/"))
+            {
+                appPath.chop(1);
+            }
+        }
 
-    QFile iconFile(iconPath);
-    if (!iconFile.open(QFile::WriteOnly)) {
-        QMessageBox::critical(this, tr("Create instance shortcut"), tr("Failed to create icon for shortcut."));
-        return;
-    }
-    bool success = icon->icon().pixmap(64, 64).save(&iconFile, "PNG");
-    iconFile.close();
+        auto icon = APPLICATION->icons()->icon(m_selectedInstance->iconKey());
+        if (icon == nullptr)
+        {
+            icon = APPLICATION->icons()->icon("grass");
+        }
 
-    if (!success) {
-        iconFile.remove();
-        QMessageBox::critical(this, tr("Create instance shortcut"), tr("Failed to create icon for shortcut."));
-        return;
-    }
+        QString iconPath = FS::PathCombine(m_selectedInstance->instanceRoot(), "icon.png");
 
-    if (DesktopServices::isFlatpak()) {
-        desktopFilePath = FS::PathCombine(desktopPath, FS::RemoveInvalidFilenameChars(m_selectedInstance->name()) + ".desktop");
-        QFileDialog fileDialog;
-        // workaround to make sure the portal file dialog opens in the desktop directory
-        fileDialog.setDirectoryUrl(desktopPath);
-        desktopFilePath = fileDialog.getSaveFileName(this, tr("Create Shortcut"), desktopFilePath, tr("Desktop Entries (*.desktop)"));
-        if (desktopFilePath.isEmpty())
-            return;  // file dialog canceled by user
-        appPath = "flatpak";
-        QString flatpakAppId = BuildConfig.LAUNCHER_DESKTOPFILENAME;
-        flatpakAppId.remove(".desktop");
-        args.append({ "run", flatpakAppId });
-    }
+        QFile iconFile(iconPath);
+        if (!iconFile.open(QFile::WriteOnly))
+        {
+            QMessageBox::critical(this, tr("Create instance shortcut"), tr("Failed to create icon for shortcut."));
+            return;
+        }
+        bool success = icon->icon().pixmap(64, 64).save(&iconFile, "PNG");
+        iconFile.close();
 
+        if (!success)
+        {
+            iconFile.remove();
+            QMessageBox::critical(this, tr("Create instance shortcut"), tr("Failed to create icon for shortcut."));
+            return;
+        }
+
+        QString desktopFilePath = FS::PathCombine(desktopPath, m_selectedInstance->name() + ".desktop");
+        QStringList args;
+        if (DesktopServices::isFlatpak()) {
+            QFileDialog fileDialog;
+            // workaround to make sure the portal file dialog opens in the desktop directory
+            fileDialog.setDirectoryUrl(desktopPath);
+            desktopFilePath = fileDialog.getSaveFileName(
+                            this, tr("Create Shortcut"), desktopFilePath,
+                            tr("Desktop Entries (*.desktop)"));
+            if (desktopFilePath.isEmpty())
+                return; // file dialog canceled by user
+            appPath = "flatpak";
+            QString flatpakAppId = BuildConfig.LAUNCHER_DESKTOPFILENAME;
+            flatpakAppId.remove(".desktop");
+            args.append({ "run", flatpakAppId });
+        }
+        args.append({ "--launch", m_selectedInstance->id() });
+        if (FS::createShortcut(desktopFilePath, appPath, args, m_selectedInstance->name(), iconPath)) {
+            QMessageBox::information(this, tr("Create instance shortcut"), tr("Created a shortcut to this instance on your desktop!"));
+        }
+        else
+        {
+            iconFile.remove();
+            QMessageBox::critical(this, tr("Create instance shortcut"), tr("Failed to create instance shortcut!"));
+        }
 #elif defined(Q_OS_WIN)
-    auto icon = APPLICATION->icons()->icon(m_selectedInstance->iconKey());
-    if (icon == nullptr) {
-        icon = APPLICATION->icons()->icon("grass");
-    }
+        auto icon = APPLICATION->icons()->icon(m_selectedInstance->iconKey());
+        if (icon == nullptr)
+        {
+            icon = APPLICATION->icons()->icon("grass");
+        }
 
-    iconPath = FS::PathCombine(m_selectedInstance->instanceRoot(), "icon.ico");
+        QString iconPath = FS::PathCombine(m_selectedInstance->instanceRoot(), "icon.ico");
 
-    // part of fix for weird bug involving the window icon being replaced
-    // dunno why it happens, but this 2-line fix seems to be enough, so w/e
-    auto appIcon = APPLICATION->getThemedIcon("logo");
+        // part of fix for weird bug involving the window icon being replaced
+        // dunno why it happens, but this 2-line fix seems to be enough, so w/e
+        auto appIcon = APPLICATION->getThemedIcon("logo");
 
-    QFile iconFile(iconPath);
-    if (!iconFile.open(QFile::WriteOnly)) {
-        QMessageBox::critical(this, tr("Create instance shortcut"), tr("Failed to create icon for shortcut."));
-        return;
-    }
-    bool success = icon->icon().pixmap(64, 64).save(&iconFile, "ICO");
-    iconFile.close();
+        QFile iconFile(iconPath);
+        if (!iconFile.open(QFile::WriteOnly))
+        {
+            QMessageBox::critical(this, tr("Create instance shortcut"), tr("Failed to create icon for shortcut."));
+            return;
+        }
+        bool success = icon->icon().pixmap(64, 64).save(&iconFile, "ICO");
+        iconFile.close();
 
-    // restore original window icon
-    QGuiApplication::setWindowIcon(appIcon);
+        // restore original window icon
+        QGuiApplication::setWindowIcon(appIcon);
 
-    if (!success) {
-        iconFile.remove();
-        QMessageBox::critical(this, tr("Create instance shortcut"), tr("Failed to create icon for shortcut."));
-        return;
-    }
+        if (!success)
+        {
+            iconFile.remove();
+            QMessageBox::critical(this, tr("Create instance shortcut"), tr("Failed to create icon for shortcut."));
+            return;
+        }
 
+        if (FS::createShortcut(FS::PathCombine(desktopPath, m_selectedInstance->name()),
+                           QApplication::applicationFilePath(), { "--launch", m_selectedInstance->id() },
+                           m_selectedInstance->name(), iconPath)) {
+            QMessageBox::information(this, tr("Create instance shortcut"), tr("Created a shortcut to this instance on your desktop!"));
+        }
+        else
+        {
+            iconFile.remove();
+            QMessageBox::critical(this, tr("Create instance shortcut"), tr("Failed to create instance shortcut!"));
+        }
 #else
-    QMessageBox::critical(this, tr("Create instance shortcut"), tr("Not supported on your platform!"));
-    return;
+        QMessageBox::critical(this, tr("Create instance shortcut"), tr("Not supported on your platform!"));
 #endif
-    args.append({ "--launch", m_selectedInstance->id() });
-    if (FS::createShortcut(desktopFilePath, appPath, args, m_selectedInstance->name(), iconPath)) {
-        QMessageBox::information(this, tr("Create instance shortcut"), tr("Created a shortcut to this instance on your desktop!"));
-    } else {
-#if not defined(Q_OS_MACOS)
-        iconFile.remove();
-#endif
-        QMessageBox::critical(this, tr("Create instance shortcut"), tr("Failed to create instance shortcut!"));
     }
 }
 

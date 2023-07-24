@@ -123,7 +123,7 @@ void ModrinthPage::onSelectionChanged(QModelIndex curr, QModelIndex prev)
         qDebug() << "Loading modrinth modpack information";
 
         auto netJob = new NetJob(QString("Modrinth::PackInformation(%1)").arg(current.name), APPLICATION->network());
-        auto response = std::make_shared<QByteArray>();
+        auto response = new QByteArray();
 
         QString id = current.id;
 
@@ -162,7 +162,10 @@ void ModrinthPage::onSelectionChanged(QModelIndex curr, QModelIndex prev)
 
             suggestCurrent();
         });
-        QObject::connect(netJob, &NetJob::finished, this, [response, netJob] { netJob->deleteLater(); });
+        QObject::connect(netJob, &NetJob::finished, this, [response, netJob] {
+            netJob->deleteLater();
+            delete response;
+        });
         netJob->start();
     } else
         updateUI();
@@ -171,7 +174,7 @@ void ModrinthPage::onSelectionChanged(QModelIndex curr, QModelIndex prev)
         qDebug() << "Loading modrinth modpack versions";
 
         auto netJob = new NetJob(QString("Modrinth::PackVersions(%1)").arg(current.name), APPLICATION->network());
-        auto response = std::make_shared<QByteArray>();
+        auto response = new QByteArray();
 
         QString id = current.id;
 
@@ -214,7 +217,10 @@ void ModrinthPage::onSelectionChanged(QModelIndex curr, QModelIndex prev)
 
             suggestCurrent();
         });
-        QObject::connect(netJob, &NetJob::finished, this, [response, netJob] { netJob->deleteLater(); });
+        QObject::connect(netJob, &NetJob::finished, this, [response, netJob] {
+            netJob->deleteLater();
+            delete response;
+        });
         netJob->start();
 
     } else {
@@ -254,8 +260,10 @@ void ModrinthPage::updateUI()
             text += donates.join(", ");
         }
 
-        if (!current.extra.issuesUrl.isEmpty() || !current.extra.sourceUrl.isEmpty() || !current.extra.wikiUrl.isEmpty() ||
-            !current.extra.discordUrl.isEmpty()) {
+        if (!current.extra.issuesUrl.isEmpty()
+         || !current.extra.sourceUrl.isEmpty()
+         || !current.extra.wikiUrl.isEmpty()
+         || !current.extra.discordUrl.isEmpty()) {
             text += "<br><br>" + tr("External links:") + "<br>";
         }
 

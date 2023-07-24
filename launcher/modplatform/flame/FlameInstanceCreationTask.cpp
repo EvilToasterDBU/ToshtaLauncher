@@ -153,9 +153,6 @@ bool FlameCreationTask::updateInstance()
 
                     old_files.remove(file.key());
                     files_iterator = files.erase(files_iterator);
-
-                    if (files_iterator != files.begin())
-                        files_iterator--;
                 }
             }
 
@@ -182,7 +179,7 @@ bool FlameCreationTask::updateInstance()
             fileIds.append(QString::number(file.fileId));
         }
 
-        auto raw_response = std::make_shared<QByteArray>();
+        auto* raw_response = new QByteArray;
         auto job = api.getFiles(fileIds, raw_response);
 
         QEventLoop loop;
@@ -470,9 +467,8 @@ void FlameCreationTask::setupDownloadJob(QEventLoop& loop)
         switch (result.type) {
             case Flame::File::Type::Folder: {
                 logWarning(tr("This 'Folder' may need extracting: %1").arg(relpath));
-                // fallthrough intentional, we treat these as plain old mods and dump them wherever.
+                // fall-through intentional, we treat these as plain old mods and dump them wherever.
             }
-            /* fallthrough */
             case Flame::File::Type::SingleFile:
             case Flame::File::Type::Mod: {
                 if (!result.url.isEmpty()) {
@@ -563,8 +559,6 @@ void FlameCreationTask::validateZIPResouces()
                 if (FS::move(localPath, destPath)) {
                     return destPath;
                 }
-            } else {
-                qDebug() << "Target folder of" << fileName << "is correct at" << targetFolder;
             }
             return localPath;
         };
@@ -586,9 +580,6 @@ void FlameCreationTask::validateZIPResouces()
         QString worldPath;
 
         switch (type) {
-            case PackedResourceType::Mod :
-                validatePath(fileName, targetFolder, "mods");
-                break;
             case PackedResourceType::ResourcePack :
                 validatePath(fileName, targetFolder, "resourcepacks");
                 break;
@@ -597,6 +588,9 @@ void FlameCreationTask::validateZIPResouces()
                 break;
             case PackedResourceType::DataPack :
                 validatePath(fileName, targetFolder, "datapacks");
+                break;
+            case PackedResourceType::Mod :
+                validatePath(fileName, targetFolder, "mods");
                 break;
             case PackedResourceType::ShaderPack :
                 // in theroy flame API can't do this but who knows, that *may* change ?

@@ -85,7 +85,7 @@ protected: /* data */
     //! True if news has been loaded.
     bool m_loadedNews;
 
-    std::shared_ptr<QByteArray> newsData = std::make_shared<QByteArray>();
+    QByteArray newsData;
 
     /*!
      * Gets the error message that was given last time the news was loaded.

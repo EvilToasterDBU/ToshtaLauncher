@@ -85,8 +85,10 @@ public:
 
     virtual QRegion visualRegionForSelection(const QItemSelection &selection) const override;
 
-    int spacing() const { return m_spacing; };
-    void setPaintCat(bool visible);
+    int spacing() const
+    {
+        return m_spacing;
+    };
 
 public slots:
     virtual void updateGeometries() override;
@@ -137,8 +139,6 @@ private:
     int m_currentItemsPerRow = -1;
     int m_currentCursorColumn= -1;
     mutable QCache<int, QRect> geometryCache;
-    bool m_catVisible = false;
-    QPixmap m_catPixmap;
 
     // point where the currently active mouse action started in geometry coordinates
     QPoint m_pressedPosition;
