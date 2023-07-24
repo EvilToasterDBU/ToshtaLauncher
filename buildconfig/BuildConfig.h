@@ -130,11 +130,6 @@ class Config {
     QString FLAME_API_KEY;
 
     /**
-     * Modrinth Token
-     */
-    QString MODRINTH_TOKEN;
-
-    /**
      * Metadata repository URL prefix
      */
     QString META_URL;

@@ -193,8 +193,6 @@ set(Launcher_MSA_CLIENT_ID "039ef54b-ae1b-40bb-933e-492ffa92bee7" CACHE STRING "
 # This key was issued specifically for Prism Launcher
 set(Launcher_CURSEFORGE_API_KEY "$2a$10$5nTFauX8BoGnCIVsmE5nC.dlceZDIsE01ht2vL6eBixfqkSnyXYPe" CACHE STRING "API key for the CurseForge platform")
 
-set(Launcher_MODRINTH_TOKEN "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" CACHE STRING "Modrinth API token")
-
 #### Check the current Git commit and branch
 include(GetGitRevisionDescription)
 git_get_exact_tag(Launcher_GIT_TAG)
