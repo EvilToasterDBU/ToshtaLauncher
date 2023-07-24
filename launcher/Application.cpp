@@ -1597,9 +1597,10 @@ QString Application::getFlameAPIKey()
 QString Application::getModrinthAPIToken()
 {
     QString tokenOverride = m_settings->get("ModrinthToken").toString();
-    if (!tokenOverride.isEmpty()){
+    if (!tokenOverride.isEmpty()) {
         return tokenOverride;
     }
+
     return BuildConfig.MODRINTH_TOKEN;
 }
 
