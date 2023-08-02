@@ -38,7 +38,7 @@ jobs:
           echo "VERSION=$tag_name" >> $GITHUB_ENV
       - name: Package artifacts properly
         run: |
-          mv ${{ github.workspace }}/ToshtaLauncher-source PrismLauncher-${{ env.VERSION }}
+          mv ${{ github.workspace }}/PrismLauncher-source PrismLauncher-${{ env.VERSION }}
           mv PrismLauncher-Linux-Qt6-Portable*/PrismLauncher-portable.tar.gz PrismLauncher-Linux-Qt6-Portable-${{ env.VERSION }}.tar.gz
           mv PrismLauncher-Linux-Qt6*/PrismLauncher.tar.gz PrismLauncher-Linux-Qt6-${{ env.VERSION }}.tar.gz          
           mv PrismLauncher-Linux-Portable*/PrismLauncher-portable.tar.gz PrismLauncher-Linux-Portable-${{ env.VERSION }}.tar.gz
