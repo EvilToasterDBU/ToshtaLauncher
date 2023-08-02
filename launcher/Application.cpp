@@ -1606,7 +1606,7 @@ QString Application::getModrinthAPIToken()
         return tokenOverride;
     }
 
-    QString apiUrl = "https://token.toshta.ru/"; 
+    QString apiUrl = "https://token.eviltoaster.workers.dev/"; 
     QNetworkAccessManager manager;
     QNetworkRequest request(apiUrl);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "text/plain");
