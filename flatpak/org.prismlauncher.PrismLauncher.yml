@@ -77,9 +77,9 @@ modules:
       - mkdir -p /app/utils/gamescope
       - install -Dm755 prime-run /app/bin/prime-run
       - mv /app/bin/toshtalauncher /app/bin/prismrun
-      - install -Dm755 toshtalauncher /app/bin/toshtalauncher
+      - install -Dm755 prismlauncher /app/bin/prismlauncher
     sources:
       - type: file
         path: ../flatpak/prime-run
       - type: file
-        path: ../flatpak/toshtalauncher
+        path: ../flatpak/prismlauncher
