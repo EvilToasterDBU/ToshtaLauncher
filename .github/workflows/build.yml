@@ -346,10 +346,10 @@ jobs:
           cmake --install ${{ env.BUILD_DIR }}
 
           cd ${{ env.INSTALL_DIR }}
-          chmod +x "PrismLauncher.app/Contents/MacOS/prismlauncher"
-          sudo codesign --sign - --deep --force --entitlements "../program_info/App.entitlements" --options runtime "PrismLauncher.app/Contents/MacOS/prismlauncher"
-          mv "PrismLauncher.app" "Prism Launcher.app"
-          tar -czf ../PrismLauncher.tar.gz *
+          chmod +x "ToshtaLauncher.app/Contents/MacOS/ToshtaLauncher"
+          sudo codesign --sign - --deep --force --entitlements "../program_info/App.entitlements" --options runtime "ToshtaLauncher.app/Contents/MacOS/prismlauncher"
+          mv "ToshtaLauncher.app" "Toshta Launcher.app"
+          tar -czf ../ToshtaLauncher.tar.gz *
 
       - name: Make Sparkle signature (macOS)
         if: matrix.name == 'macOS'
@@ -357,7 +357,7 @@ jobs:
           if [ '${{ secrets.SPARKLE_ED25519_KEY }}' != '' ]; then
             brew install openssl@3
             echo '${{ secrets.SPARKLE_ED25519_KEY }}' > ed25519-priv.pem
-            signature=$(/usr/local/opt/openssl@3/bin/openssl pkeyutl -sign -rawin -in ${{ github.workspace }}/PrismLauncher.tar.gz -inkey ed25519-priv.pem | openssl base64 | tr -d \\n)
+            signature=$(/usr/local/opt/openssl@3/bin/openssl pkeyutl -sign -rawin -in ${{ github.workspace }}/ToshtaLauncher.tar.gz -inkey ed25519-priv.pem | openssl base64 | tr -d \\n)
             rm ed25519-priv.pem
             cat >> $GITHUB_STEP_SUMMARY << EOF
           ### Artifact Information :information_source:
@@ -449,7 +449,7 @@ jobs:
           for l in $(find ${{ env.INSTALL_DIR }} -type f); do l=${l#$(pwd)/}; l=${l#${{ env.INSTALL_DIR }}/}; l=${l#./}; echo $l; done > ${{ env.INSTALL_DIR }}/manifest.txt
 
           cd ${{ env.INSTALL_DIR }}
-          tar --owner root --group root -czf ../PrismLauncher.tar.gz *
+          tar --owner root --group root -czf ../ToshtaLauncher.tar.gz *
 
       - name: Package (Linux, portable)
         if: runner.os == 'Linux'
@@ -460,7 +460,7 @@ jobs:
 
 
           cd ${{ env.INSTALL_PORTABLE_DIR }}
-          tar -czf ../PrismLauncher-portable.tar.gz *
+          tar -czf ../ToshtaLauncher-portable.tar.gz *
 
       - name: Package AppImage (Linux)
         if: runner.os == 'Linux' && matrix.qt_ver != 5
@@ -468,7 +468,7 @@ jobs:
         run: |
           cmake --install ${{ env.BUILD_DIR }} --prefix ${{ env.INSTALL_APPIMAGE_DIR }}/usr
 
-          export OUTPUT="PrismLauncher-${{ runner.os }}-${{ env.VERSION }}-${{ inputs.build_type }}-x86_64.AppImage"
+          export OUTPUT="ToshtaLauncher-${{ runner.os }}-${{ env.VERSION }}-${{ inputs.build_type }}-x86_64.AppImage"
 
           chmod +x linuxdeploy-*.AppImage
 
@@ -501,64 +501,64 @@ jobs:
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@v3
         with:
-          name: PrismLauncher-${{ matrix.name }}-${{ env.VERSION }}-${{ inputs.build_type }}
-          path: PrismLauncher.tar.gz
+          name: ToshtaLauncher-${{ matrix.name }}-${{ env.VERSION }}-${{ inputs.build_type }}
+          path: ToshtaLauncher.tar.gz
 
       - name: Upload binary zip (Windows)
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v3
         with:
-          name: PrismLauncher-${{ matrix.name }}-${{ env.VERSION }}-${{ inputs.build_type }}
+          name: ToshtaLauncher-${{ matrix.name }}-${{ env.VERSION }}-${{ inputs.build_type }}
           path: ${{ env.INSTALL_DIR }}/**
 
       - name: Upload binary zip (Windows, portable)
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v3
         with:
-          name: PrismLauncher-${{ matrix.name }}-Portable-${{ env.VERSION }}-${{ inputs.build_type }}
+          name: ToshtaLauncher-${{ matrix.name }}-Portable-${{ env.VERSION }}-${{ inputs.build_type }}
           path: ${{ env.INSTALL_PORTABLE_DIR }}/**
 
       - name: Upload installer (Windows)
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v3
         with:
-          name: PrismLauncher-${{ matrix.name }}-Setup-${{ env.VERSION }}-${{ inputs.build_type }}
-          path: PrismLauncher-Setup.exe
+          name: ToshtaLauncher-${{ matrix.name }}-Setup-${{ env.VERSION }}-${{ inputs.build_type }}
+          path: ToshtaLauncher-Setup.exe
 
       - name: Upload binary tarball (Linux, Qt 5)
         if: runner.os == 'Linux' && matrix.qt_ver != 6
         uses: actions/upload-artifact@v3
         with:
-          name: PrismLauncher-${{ runner.os }}-${{ env.VERSION }}-${{ inputs.build_type }}
-          path: PrismLauncher.tar.gz
+          name: ToshtaLauncher-${{ runner.os }}-${{ env.VERSION }}-${{ inputs.build_type }}
+          path: ToshtaLauncher.tar.gz
 
       - name: Upload binary tarball (Linux, portable, Qt 5)
         if: runner.os == 'Linux' && matrix.qt_ver != 6
         uses: actions/upload-artifact@v3
         with:
-          name: PrismLauncher-${{ runner.os }}-Portable-${{ env.VERSION }}-${{ inputs.build_type }}
-          path: PrismLauncher-portable.tar.gz
+          name: ToshtaLauncher-${{ runner.os }}-Portable-${{ env.VERSION }}-${{ inputs.build_type }}
+          path: ToshtaLauncher-portable.tar.gz
 
       - name: Upload binary tarball (Linux, Qt 6)
         if: runner.os == 'Linux' && matrix.qt_ver !=5
         uses: actions/upload-artifact@v3
         with:
-          name: PrismLauncher-${{ runner.os }}-Qt6-${{ env.VERSION }}-${{ inputs.build_type }}
-          path: PrismLauncher.tar.gz
+          name: ToshtaLauncher-${{ runner.os }}-Qt6-${{ env.VERSION }}-${{ inputs.build_type }}
+          path: ToshtaLauncher.tar.gz
 
       - name: Upload binary tarball (Linux, portable, Qt 6)
         if: runner.os == 'Linux' && matrix.qt_ver != 5
         uses: actions/upload-artifact@v3
         with:
-          name: PrismLauncher-${{ runner.os }}-Qt6-Portable-${{ env.VERSION }}-${{ inputs.build_type }}
-          path: PrismLauncher-portable.tar.gz
+          name: ToshtaLauncher-${{ runner.os }}-Qt6-Portable-${{ env.VERSION }}-${{ inputs.build_type }}
+          path: ToshtaLauncher-portable.tar.gz
 
       - name: Upload AppImage (Linux)
         if: runner.os == 'Linux' && matrix.qt_ver != 5
         uses: actions/upload-artifact@v3
         with:
-          name: PrismLauncher-${{ runner.os }}-${{ env.VERSION }}-${{ inputs.build_type }}-x86_64.AppImage
-          path: PrismLauncher-${{ runner.os }}-${{ env.VERSION }}-${{ inputs.build_type }}-x86_64.AppImage
+          name: ToshtaLauncher-${{ runner.os }}-${{ env.VERSION }}-${{ inputs.build_type }}-x86_64.AppImage
+          path: ToshtaLauncher-${{ runner.os }}-${{ env.VERSION }}-${{ inputs.build_type }}-x86_64.AppImage
 
       - name: ccache stats (Windows MinGW-w64)
         if: runner.os == 'Windows' && matrix.msystem != ''
@@ -581,7 +581,7 @@ jobs:
         if: inputs.build_type == 'Debug'
         uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:
-          bundle: "Prism Launcher.flatpak"
+          bundle: "Toshta Launcher.flatpak"
           manifest-path: flatpak/org.prismlauncher.PrismLauncher.yml 
 
   nix:
