@@ -347,7 +347,7 @@ jobs:
 
           cd ${{ env.INSTALL_DIR }}
           chmod +x "ToshtaLauncher.app/Contents/MacOS/ToshtaLauncher"
-          sudo codesign --sign - --deep --force --entitlements "../program_info/App.entitlements" --options runtime "ToshtaLauncher.app/Contents/MacOS/prismlauncher"
+          sudo codesign --sign - --deep --force --entitlements "../program_info/App.entitlements" --options runtime "ToshtaLauncher.app/Contents/MacOS/toshtalauncher"
           mv "ToshtaLauncher.app" "Toshta Launcher.app"
           tar -czf ../ToshtaLauncher.tar.gz *
 
