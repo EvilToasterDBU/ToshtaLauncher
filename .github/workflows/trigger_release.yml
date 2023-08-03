@@ -29,7 +29,7 @@ jobs:
         uses: actions/checkout@v3
         with:
           submodules: 'true'
-          path: 'ToshtaLauncher-source'
+          path: 'PrismLauncher-source'
       - name: Download artifacts
         uses: actions/download-artifact@v3
       - name: Grab and store version
