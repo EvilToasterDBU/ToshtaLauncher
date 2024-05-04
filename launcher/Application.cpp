@@ -229,6 +229,7 @@ Application::Application(int& argc, char** argv) : QApplication(argc, argv)
 
     // Don't quit on hiding the last window
     this->setQuitOnLastWindowClosed(false);
+    this->setQuitLockEnabled(false);
 
     // Commandline parsing
     QCommandLineParser parser;
