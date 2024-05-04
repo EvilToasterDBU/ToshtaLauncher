@@ -94,16 +94,6 @@
             </widget>
            </item>
            <item>
-            <widget class="QCheckBox" name="oldSnapshotFilter">
-             <property name="text">
-              <string>Old Snapshots</string>
-             </property>
-             <property name="checkable">
-              <bool>true</bool>
-             </property>
-            </widget>
-           </item>
-           <item>
             <widget class="QCheckBox" name="betaFilter">
              <property name="text">
               <string>Betas</string>
@@ -195,6 +185,16 @@
             </widget>
            </item>
            <item>
+            <widget class="QRadioButton" name="neoForgeFilter">
+             <property name="text">
+              <string>NeoForge</string>
+             </property>
+             <attribute name="buttonGroup">
+              <string notr="true">loaderBtnGroup</string>
+             </attribute>
+            </widget>
+           </item>
+           <item>
             <widget class="QRadioButton" name="forgeFilter">
              <property name="text">
               <string>Forge</string>
@@ -276,7 +276,6 @@
   <tabstop>tabWidget</tabstop>
   <tabstop>releaseFilter</tabstop>
   <tabstop>snapshotFilter</tabstop>
-  <tabstop>oldSnapshotFilter</tabstop>
   <tabstop>betaFilter</tabstop>
   <tabstop>alphaFilter</tabstop>
   <tabstop>experimentsFilter</tabstop>

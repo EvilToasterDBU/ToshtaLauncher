@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 /*
- *  PolyMC - Minecraft Launcher
+ *  Prism Launcher - Minecraft Launcher
  *  Copyright (c) 2022 Jamie Mansfield <jmansfield@cadixdev.org>
  *
  *  This program is free software: you can redistribute it and/or modify
@@ -77,4 +77,4 @@ class BasePage {
     bool isOpened = false;
 };
 
-typedef std::shared_ptr<BasePage> BasePagePtr;
+using BasePagePtr = std::shared_ptr<BasePage>;

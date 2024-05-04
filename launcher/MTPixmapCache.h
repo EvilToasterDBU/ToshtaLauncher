@@ -1,10 +1,11 @@
 #pragma once
 
 #include <QCoreApplication>
+#include <QDebug>
 #include <QPixmapCache>
 #include <QThread>
 #include <QTime>
-#include <QDebug>
+#include <limits>
 
 #define GET_TYPE()                                                          \
     Qt::ConnectionType type;                                                \
@@ -94,16 +95,20 @@ class PixmapCache final : public QObject {
         return true;
     }
 
-    /** 
-     *  Mark that a cache miss occurred because of a eviction if too many of these occur too fast the cache size is increased 
+    /**
+     *  Mark that a cache miss occurred because of a eviction if too many of these occur too fast the cache size is increased
      * @return if the cache size was increased
      */
     bool _markCacheMissByEviciton()
     {
+        static constexpr uint maxInt = static_cast<uint>(std::numeric_limits<int>::max());
+        static constexpr uint step = 10240;
+        static constexpr int oneSecond = 1000;
+
         auto now = QTime::currentTime();
         if (!m_last_cache_miss_by_eviciton.isNull()) {
             auto diff = m_last_cache_miss_by_eviciton.msecsTo(now);
-            if (diff < 1000) {  // less than a second ago
+            if (diff < oneSecond) {  // less than a second ago
                 ++m_consecutive_fast_evicitons;
             } else {
                 m_consecutive_fast_evicitons = 0;
@@ -111,11 +116,17 @@ class PixmapCache final : public QObject {
         }
         m_last_cache_miss_by_eviciton = now;
         if (m_consecutive_fast_evicitons >= m_consecutive_fast_evicitons_threshold) {
-            // double the cache size
-            auto newSize = _cacheLimit() * 2;
-            qDebug() << m_consecutive_fast_evicitons << "pixmap cache misses by eviction happened too fast, doubling cache size to"
-                     << newSize;
-            _setCacheLimit(newSize);
+            // increase the cache size
+            uint newSize = _cacheLimit() + step;
+            if (newSize >= maxInt) {  // increase it until you overflow :D
+                newSize = maxInt;
+                qDebug() << m_consecutive_fast_evicitons
+                         << tr("pixmap cache misses by eviction happened too fast, doing nothing as the cache size reached it's limit");
+            } else {
+                qDebug() << m_consecutive_fast_evicitons
+                         << tr("pixmap cache misses by eviction happened too fast, increasing cache size to") << static_cast<int>(newSize);
+            }
+            _setCacheLimit(static_cast<int>(newSize));
             m_consecutive_fast_evicitons = 0;
             return true;
         }

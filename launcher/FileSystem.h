@@ -43,10 +43,10 @@
 #include <system_error>
 
 #include <QDir>
-#include <QPair>
 #include <QFlags>
 #include <QLocalServer>
 #include <QObject>
+#include <QPair>
 #include <QThread>
 
 namespace FS {
@@ -60,6 +60,16 @@ class FileSystemException : public ::Exception {
  * write data to a file safely
  */
 void write(const QString& filename, const QByteArray& data);
+
+/**
+ * append data to a file safely
+ */
+void appendSafe(const QString& filename, const QByteArray& data);
+
+/**
+ * append data to a file
+ */
+void append(const QString& filename, const QByteArray& data);
 
 /**
  * read data from a file safely\
@@ -81,7 +91,13 @@ bool ensureFilePathExists(QString filenamepath);
  * Creates all the folders in a path for the specified path
  * last segment of the path is treated as a folder name and is created!
  */
-bool ensureFolderPathExists(QString filenamepath);
+bool ensureFolderPathExists(const QFileInfo folderPath);
+
+/**
+ * Creates all the folders in a path for the specified path
+ * last segment of the path is treated as a folder name and is created!
+ */
+bool ensureFolderPathExists(const QString folderPathName);
 
 /**
  * @brief Copies a directory and it's contents from src to dest
@@ -109,11 +125,16 @@ class copy : public QObject {
         m_whitelist = whitelist;
         return *this;
     }
+    copy& overwrite(const bool overwrite)
+    {
+        m_overwrite = overwrite;
+        return *this;
+    }
 
     bool operator()(bool dryRun = false) { return operator()(QString(), dryRun); }
 
-    int totalCopied() { return m_copied; }
-    int totalFailed() { return m_failedPaths.length(); }
+    qsizetype totalCopied() { return m_copied; }
+    qsizetype totalFailed() { return m_failedPaths.length(); }
     QStringList failed() { return m_failedPaths; }
 
    signals:
@@ -128,9 +149,10 @@ class copy : public QObject {
     bool m_followSymlinks = true;
     const IPathMatcher* m_matcher = nullptr;
     bool m_whitelist = false;
+    bool m_overwrite = false;
     QDir m_src;
     QDir m_dst;
-    int m_copied;
+    qsizetype m_copied;
     QStringList m_failedPaths;
 };
 
@@ -320,6 +342,8 @@ QString NormalizePath(QString path);
 
 QString RemoveInvalidFilenameChars(QString string, QChar replaceWith = '-');
 
+QString RemoveInvalidPathChars(QString string, QChar replaceWith = '-');
+
 QString DirNameFromString(QString string, QString inDir = ".");
 
 /// Checks if the a given Path contains "!"
@@ -365,25 +389,24 @@ enum class FilesystemType {
  * QMap is ordered
  *
  */
-static const QMap<FilesystemType, QStringList> s_filesystem_type_names = {
-    {FilesystemType::FAT,        { "FAT" }},
-    {FilesystemType::NTFS,       { "NTFS" }},
-    {FilesystemType::REFS,       { "REFS" }},
-    {FilesystemType::EXT_2_OLD,  { "EXT_2_OLD", "EXT2_OLD" }},
-    {FilesystemType::EXT_2_3_4,  { "EXT2/3/4", "EXT_2_3_4", "EXT2", "EXT3", "EXT4" }},
-    {FilesystemType::EXT,        { "EXT" }},
-    {FilesystemType::XFS,        { "XFS" }},
-    {FilesystemType::BTRFS,      { "BTRFS" }},
-    {FilesystemType::NFS,        { "NFS" }},
-    {FilesystemType::ZFS,        { "ZFS" }},
-    {FilesystemType::APFS,       { "APFS" }},
-    {FilesystemType::HFS,        { "HFS" }},
-    {FilesystemType::HFSPLUS,    { "HFSPLUS" }},
-    {FilesystemType::HFSX,       { "HFSX" }},
-    {FilesystemType::FUSEBLK,    { "FUSEBLK" }},
-    {FilesystemType::F2FS,       { "F2FS" }},
-    {FilesystemType::UNKNOWN,    { "UNKNOWN" }}
-};
+static const QMap<FilesystemType, QStringList> s_filesystem_type_names = { { FilesystemType::FAT, { "FAT" } },
+                                                                           { FilesystemType::NTFS, { "NTFS" } },
+                                                                           { FilesystemType::REFS, { "REFS" } },
+                                                                           { FilesystemType::EXT_2_OLD, { "EXT_2_OLD", "EXT2_OLD" } },
+                                                                           { FilesystemType::EXT_2_3_4,
+                                                                             { "EXT2/3/4", "EXT_2_3_4", "EXT2", "EXT3", "EXT4" } },
+                                                                           { FilesystemType::EXT, { "EXT" } },
+                                                                           { FilesystemType::XFS, { "XFS" } },
+                                                                           { FilesystemType::BTRFS, { "BTRFS" } },
+                                                                           { FilesystemType::NFS, { "NFS" } },
+                                                                           { FilesystemType::ZFS, { "ZFS" } },
+                                                                           { FilesystemType::APFS, { "APFS" } },
+                                                                           { FilesystemType::HFS, { "HFS" } },
+                                                                           { FilesystemType::HFSPLUS, { "HFSPLUS" } },
+                                                                           { FilesystemType::HFSX, { "HFSX" } },
+                                                                           { FilesystemType::FUSEBLK, { "FUSEBLK" } },
+                                                                           { FilesystemType::F2FS, { "F2FS" } },
+                                                                           { FilesystemType::UNKNOWN, { "UNKNOWN" } } };
 
 /**
  * @brief Get the string name of Filesystem enum object
@@ -475,8 +498,8 @@ class clone : public QObject {
 
     bool operator()(bool dryRun = false) { return operator()(QString(), dryRun); }
 
-    int totalCloned() { return m_cloned; }
-    int totalFailed() { return m_failedClones.length(); }
+    qsizetype totalCloned() { return m_cloned; }
+    qsizetype totalFailed() { return m_failedClones.length(); }
 
     QList<QPair<QString, QString>> failed() { return m_failedClones; }
 
@@ -492,7 +515,7 @@ class clone : public QObject {
     bool m_whitelist = false;
     QDir m_src;
     QDir m_dst;
-    int m_cloned;
+    qsizetype m_cloned;
     QList<QPair<QString, QString>> m_failedClones;
 };
 
@@ -529,5 +552,9 @@ bool canLinkOnFS(FilesystemType type);
 bool canLink(const QString& src, const QString& dst);
 
 uintmax_t hardLinkCount(const QString& path);
+
+#ifdef Q_OS_WIN
+QString getPathNameInLocal8bit(const QString& file);
+#endif
 
 }  // namespace FS

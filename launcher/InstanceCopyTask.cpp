@@ -43,10 +43,10 @@ void InstanceCopyTask::executeTask()
         QFileInfo dotMCDir(FS::PathCombine(m_stagingPath, ".minecraft"));
 
         QString staging_mc_dir;
-        if (mcDir.exists() && !dotMCDir.exists())
-            staging_mc_dir = mcDir.filePath();
-        else
+        if (dotMCDir.exists() && !mcDir.exists())
             staging_mc_dir = dotMCDir.filePath();
+        else
+            staging_mc_dir = mcDir.filePath();
 
         FS::copy savesCopy(FS::PathCombine(m_origInstance->gameRoot(), "saves"), FS::PathCombine(staging_mc_dir, "saves"));
         savesCopy.followSymlinks(true);
@@ -142,9 +142,8 @@ void InstanceCopyTask::copyFinished()
     if (!m_keepPlaytime) {
         inst->resetTimePlayed();
     }
-    if (m_useLinks)
-        inst->addLinkedInstanceId(m_origInstance->id());
     if (m_useLinks) {
+        inst->addLinkedInstanceId(m_origInstance->id());
         auto allowed_symlinks_file = QFileInfo(FS::PathCombine(inst->gameRoot(), "allowed_symlinks.txt"));
 
         QByteArray allowed_symlinks;
@@ -156,8 +155,9 @@ void InstanceCopyTask::copyFinished()
         allowed_symlinks.append(m_origInstance->gameRoot().toUtf8());
         allowed_symlinks.append("\n");
         if (allowed_symlinks_file.isSymLink())
-            FS::deletePath(allowed_symlinks_file
-                               .filePath());  // we dont want to modify the original. also make sure the resulting file is not itself a link.
+            FS::deletePath(
+                allowed_symlinks_file
+                    .filePath());  // we dont want to modify the original. also make sure the resulting file is not itself a link.
 
         FS::write(allowed_symlinks_file.filePath(), allowed_symlinks);
     }

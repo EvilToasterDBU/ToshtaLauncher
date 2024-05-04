@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 /*
- *  PolyMC - Minecraft Launcher
+ *  Prism Launcher - Minecraft Launcher
  *  Copyright (c) 2022 flowln <flowlnlnln@gmail.com>
  *
  *  This program is free software: you can redistribute it and/or modify
@@ -178,7 +178,7 @@ bool processZIP(ResourcePack& pack, ProcessingLevel level)
     return true;
 }
 
-// https://minecraft.fandom.com/wiki/Tutorials/Creating_a_resource_pack#Formatting_pack.mcmeta
+// https://minecraft.wiki/w/Tutorials/Creating_a_resource_pack#Formatting_pack.mcmeta
 bool processMCMeta(ResourcePack& pack, QByteArray&& raw_data)
 {
     try {
@@ -207,15 +207,14 @@ bool processPackPNG(const ResourcePack& pack, QByteArray&& raw_data)
 }
 
 bool processPackPNG(const ResourcePack& pack)
-{   
+{
     auto png_invalid = [&pack]() {
         qWarning() << "Resource pack at" << pack.fileinfo().filePath() << "does not have a valid pack.png";
         return false;
     };
 
     switch (pack.type()) {
-        case ResourceType::FOLDER: 
-        {
+        case ResourceType::FOLDER: {
             QFileInfo image_file_info(FS::PathCombine(pack.fileinfo().filePath(), "pack.png"));
             if (image_file_info.exists() && image_file_info.isFile()) {
                 QFile pack_png_file(image_file_info.filePath());
@@ -233,11 +232,9 @@ bool processPackPNG(const ResourcePack& pack)
             } else {
                 return png_invalid();  // pack.png does not exists or is not a valid file.
             }
+            return false;  // not processed correctly; https://github.com/PrismLauncher/PrismLauncher/issues/1740
         }
-        case ResourceType::ZIPFILE:
-        {
-            Q_ASSERT(pack.type() == ResourceType::ZIPFILE);
-
+        case ResourceType::ZIPFILE: {
             QuaZip zip(pack.fileinfo().filePath());
             if (!zip.open(QuaZip::mdUnzip))
                 return false;  // can't open zip file
@@ -261,6 +258,7 @@ bool processPackPNG(const ResourcePack& pack)
             } else {
                 return png_invalid();  // could not set pack.mcmeta as current file.
             }
+            return false;  // not processed correctly; https://github.com/PrismLauncher/PrismLauncher/issues/1740
         }
         default:
             qWarning() << "Invalid type for resource pack parse task!";

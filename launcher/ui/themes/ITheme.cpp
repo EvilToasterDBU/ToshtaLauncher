@@ -2,6 +2,7 @@
 /*
  *  Prism Launcher - Minecraft Launcher
  *  Copyright (C) 2022 Tayou <git@tayou.org>
+ *  Copyright (C) 2024 TheKodeToad <TheKodeToad@proton.me>
  *
  *  This program is free software: you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -33,15 +34,16 @@
  *      limitations under the License.
  */
 #include "ITheme.h"
-#include "rainbow.h"
-#include <QStyleFactory>
 #include <QDir>
+#include <QStyleFactory>
 #include "Application.h"
+#include "HintOverrideProxyStyle.h"
+#include "rainbow.h"
 
 void ITheme::apply(bool)
 {
     APPLICATION->setStyleSheet(QString());
-    QApplication::setStyle(QStyleFactory::create(qtTheme()));
+    QApplication::setStyle(new HintOverrideProxyStyle(QStyleFactory::create(qtTheme())));
     if (hasColorScheme()) {
         QApplication::setPalette(colorScheme());
     }
@@ -51,8 +53,7 @@ void ITheme::apply(bool)
 
 QPalette ITheme::fadeInactive(QPalette in, qreal bias, QColor color)
 {
-    auto blend = [&in, bias, color](QPalette::ColorRole role)
-    {
+    auto blend = [&in, bias, color](QPalette::ColorRole role) {
         QColor from = in.color(QPalette::Active, role);
         QColor blended = Rainbow::mix(from, color, bias);
         in.setColor(QPalette::Disabled, role, blended);
