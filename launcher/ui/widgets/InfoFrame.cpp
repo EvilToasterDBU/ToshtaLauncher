@@ -36,6 +36,8 @@
 
 #include <QLabel>
 #include <QMessageBox>
+#include <QTextCursor>
+#include <QTextDocument>
 #include <QToolTip>
 
 #include "InfoFrame.h"
@@ -158,12 +160,12 @@ QString InfoFrame::renderColorCodes(QString input)
     //
     // TODO: Wrap links inside <a> tags
 
-    // https://minecraft.fandom.com/wiki/Formatting_codes#Color_codes
+    // https://minecraft.wiki/w/Formatting_codes#Color_codes
     const QMap<QChar, QString> color_codes_map = { { '0', "#000000" }, { '1', "#0000AA" }, { '2', "#00AA00" }, { '3', "#00AAAA" },
                                                    { '4', "#AA0000" }, { '5', "#AA00AA" }, { '6', "#FFAA00" }, { '7', "#AAAAAA" },
                                                    { '8', "#555555" }, { '9', "#5555FF" }, { 'a', "#55FF55" }, { 'b', "#55FFFF" },
                                                    { 'c', "#FF5555" }, { 'd', "#FF55FF" }, { 'e', "#FFFF55" }, { 'f', "#FFFFFF" } };
-    // https://minecraft.fandom.com/wiki/Formatting_codes#Formatting_codes
+    // https://minecraft.wiki/w/Formatting_codes#Formatting_codes
     const QMap<QChar, QString> formatting_codes_map = { { 'l', "b" }, { 'm', "s" }, { 'n', "u" }, { 'o', "i" } };
 
     QString html("<html>");
@@ -274,12 +276,27 @@ void InfoFrame::setDescription(QString text)
     }
     QString labeltext;
     labeltext.reserve(300);
-    if (finaltext.length() > 290) {
+
+    // elide rich text by getting characters without formatting
+    const int maxCharacterElide = 290;
+    QTextDocument doc;
+    doc.setHtml(text);
+
+    if (doc.characterCount() > maxCharacterElide) {
         ui->descriptionLabel->setOpenExternalLinks(false);
-        ui->descriptionLabel->setTextFormat(Qt::TextFormat::RichText);
+        ui->descriptionLabel->setTextFormat(Qt::TextFormat::RichText);  // This allows injecting HTML here.
         m_description = text;
-        // This allows injecting HTML here.
-        labeltext.append("<html><body>" + finaltext.left(287) + "<a href=\"#mod_desc\">...</a></body></html>");
+
+        // move the cursor to the character elide, doesn't see html
+        QTextCursor cursor(&doc);
+        cursor.movePosition(QTextCursor::End);
+        cursor.setPosition(maxCharacterElide, QTextCursor::KeepAnchor);
+        cursor.removeSelectedText();
+
+        // insert the post fix at the cursor
+        cursor.insertHtml("<a href=\"#mod_desc\">...</a>");
+
+        labeltext.append(doc.toHtml());
         QObject::connect(ui->descriptionLabel, &QLabel::linkActivated, this, &InfoFrame::descriptionEllipsisHandler);
     } else {
         ui->descriptionLabel->setTextFormat(Qt::TextFormat::AutoText);
@@ -316,7 +333,7 @@ void InfoFrame::setLicense(QString text)
     if (finaltext.length() > 290) {
         ui->licenseLabel->setOpenExternalLinks(false);
         ui->licenseLabel->setTextFormat(Qt::TextFormat::RichText);
-        m_description = text;
+        m_license = text;
         // This allows injecting HTML here.
         labeltext.append("<html><body>" + finaltext.left(287) + "<a href=\"#mod_desc\">...</a></body></html>");
         QObject::connect(ui->licenseLabel, &QLabel::linkActivated, this, &InfoFrame::licenseEllipsisHandler);
@@ -348,7 +365,7 @@ void InfoFrame::setImage(QPixmap img)
     }
 }
 
-void InfoFrame::descriptionEllipsisHandler(QString link)
+void InfoFrame::descriptionEllipsisHandler([[maybe_unused]] QString link)
 {
     if (!m_current_box) {
         m_current_box = CustomMessageBox::selectable(this, "", m_description);
@@ -359,7 +376,7 @@ void InfoFrame::descriptionEllipsisHandler(QString link)
     }
 }
 
-void InfoFrame::licenseEllipsisHandler(QString link)
+void InfoFrame::licenseEllipsisHandler([[maybe_unused]] QString link)
 {
     if (!m_current_box) {
         m_current_box = CustomMessageBox::selectable(this, "", m_license);
@@ -370,7 +387,7 @@ void InfoFrame::licenseEllipsisHandler(QString link)
     }
 }
 
-void InfoFrame::boxClosed(int result)
+void InfoFrame::boxClosed([[maybe_unused]] int result)
 {
     m_current_box = nullptr;
 }

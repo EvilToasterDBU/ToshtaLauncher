@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 /*
- *  PolyMC - Minecraft Launcher
+ *  Prism Launcher - Minecraft Launcher
  *  Copyright (C) 2022 Sefa Eyeoglu <contact@scrumplex.net>
  *
  *  This program is free software: you can redistribute it and/or modify
@@ -35,81 +35,64 @@
 
 #include "LauncherPartLaunch.h"
 
-#include <QStandardPaths>
 #include <QRegularExpression>
+#include <QStandardPaths>
 
+#include "Application.h"
+#include "Commandline.h"
+#include "FileSystem.h"
 #include "launch/LaunchTask.h"
 #include "minecraft/MinecraftInstance.h"
-#include "FileSystem.h"
-#include "Commandline.h"
-#include "Application.h"
 
 #ifdef Q_OS_LINUX
 #include "gamemode_client.h"
 #endif
 
-LauncherPartLaunch::LauncherPartLaunch(LaunchTask *parent) : LaunchStep(parent)
+LauncherPartLaunch::LauncherPartLaunch(LaunchTask* parent)
+    : LaunchStep(parent)
+    , m_process(parent->instance()->getJavaVersion().defaultsToUtf8() ? QTextCodec::codecForName("UTF-8") : QTextCodec::codecForLocale())
 {
-    auto instance = parent->instance();
-    if (instance->settings()->get("CloseAfterLaunch").toBool())
-    {
-        std::shared_ptr<QMetaObject::Connection> connection{new QMetaObject::Connection};
-        *connection = connect(&m_process, &LoggedProcess::log, this, [=](QStringList lines, MessageLevel::Enum level) {
-            qDebug() << lines;
-            if (lines.filter(QRegularExpression(".*Setting user.+", QRegularExpression::CaseInsensitiveOption)).length() != 0)
-            {
-                APPLICATION->closeAllWindows();
-                disconnect(*connection);
-            }
-        });
+    if (parent->instance()->settings()->get("CloseAfterLaunch").toBool()) {
+        std::shared_ptr<QMetaObject::Connection> connection{ new QMetaObject::Connection };
+        *connection =
+            connect(&m_process, &LoggedProcess::log, this, [=](const QStringList& lines, [[maybe_unused]] MessageLevel::Enum level) {
+                qDebug() << lines;
+                if (lines.filter(QRegularExpression(".*Setting user.+", QRegularExpression::CaseInsensitiveOption)).length() != 0) {
+                    APPLICATION->closeAllWindows();
+                    disconnect(*connection);
+                }
+            });
     }
 
     connect(&m_process, &LoggedProcess::log, this, &LauncherPartLaunch::logLines);
     connect(&m_process, &LoggedProcess::stateChanged, this, &LauncherPartLaunch::on_state);
 }
 
-#ifdef Q_OS_WIN
-// returns 8.3 file format from long path
-#include <windows.h>
-QString shortPathName(const QString & file)
-{
-    auto input = file.toStdWString();
-    std::wstring output;
-    long length = GetShortPathNameW(input.c_str(), NULL, 0);
-    // NOTE: this resizing might seem weird...
-    // when GetShortPathNameW fails, it returns length including null character
-    // when it succeeds, it returns length excluding null character
-    // See: https://msdn.microsoft.com/en-us/library/windows/desktop/aa364989(v=vs.85).aspx
-    output.resize(length);
-    GetShortPathNameW(input.c_str(),(LPWSTR)output.c_str(),length);
-    output.resize(length-1);
-    QString ret = QString::fromStdWString(output);
-    return ret;
-}
-#endif
-
-// if the string survives roundtrip through local 8bit encoding...
-bool fitsInLocal8bit(const QString & string)
-{
-    return string == QString::fromLocal8Bit(string.toLocal8Bit());
-}
-
 void LauncherPartLaunch::executeTask()
 {
     QString jarPath = APPLICATION->getJarPath("NewLaunch.jar");
-    if (jarPath.isEmpty())
-    {
-        const char *reason = QT_TR_NOOP("Launcher library could not be found. Please check your installation.");
+    if (jarPath.isEmpty()) {
+        const char* reason = QT_TR_NOOP("Launcher library could not be found. Please check your installation.");
         emit logLine(tr(reason), MessageLevel::Fatal);
         emitFailed(tr(reason));
         return;
     }
 
     auto instance = m_parent->instance();
-    std::shared_ptr<MinecraftInstance> minecraftInstance = std::dynamic_pointer_cast<MinecraftInstance>(instance);
 
-    m_launchScript = minecraftInstance->createLaunchScript(m_session, m_serverToJoin);
-    QStringList args = minecraftInstance->javaArguments();
+    QString legacyJarPath;
+    if (instance->getLauncher() == "legacy" || instance->shouldApplyOnlineFixes()) {
+        legacyJarPath = APPLICATION->getJarPath("NewLaunchLegacy.jar");
+        if (legacyJarPath.isEmpty()) {
+            const char* reason = QT_TR_NOOP("Legacy launcher library could not be found. Please check your installation.");
+            emit logLine(tr(reason), MessageLevel::Fatal);
+            emitFailed(tr(reason));
+            return;
+        }
+    }
+
+    m_launchScript = instance->createLaunchScript(m_session, m_targetToJoin);
+    QStringList args = instance->javaArguments();
     QString allArgs = args.join(", ");
     emit logLine("Java Arguments:\n[" + m_parent->censorPrivateInfo(allArgs) + "]\n\n", MessageLevel::Launcher);
 
@@ -120,36 +103,23 @@ void LauncherPartLaunch::executeTask()
     // make detachable - this will keep the process running even if the object is destroyed
     m_process.setDetachable(true);
 
-    auto classPath = minecraftInstance->getClassPath();
+    auto classPath = instance->getClassPath();
     classPath.prepend(jarPath);
 
-    auto natPath = minecraftInstance->getNativePath();
+    if (!legacyJarPath.isEmpty())
+        classPath.prepend(legacyJarPath);
+
+    auto natPath = instance->getNativePath();
 #ifdef Q_OS_WIN
-    if (!fitsInLocal8bit(natPath))
-    {
-        args << "-Djava.library.path=" + shortPathName(natPath);
-    }
-    else
-    {
-        args << "-Djava.library.path=" + natPath;
-    }
-#else
-    args << "-Djava.library.path=" + natPath;
+    natPath = FS::getPathNameInLocal8bit(natPath);
 #endif
+    args << "-Djava.library.path=" + natPath;
 
     args << "-cp";
 #ifdef Q_OS_WIN
     QStringList processed;
-    for(auto & item: classPath)
-    {
-        if (!fitsInLocal8bit(item))
-        {
-            processed << shortPathName(item);
-        }
-        else
-        {
-            processed << item;
-        }
+    for (auto& item : classPath) {
+        processed << FS::getPathNameInLocal8bit(item);
     }
     args << processed.join(';');
 #else
@@ -160,14 +130,12 @@ void LauncherPartLaunch::executeTask()
     qDebug() << args.join(' ');
 
     QString wrapperCommandStr = instance->getWrapperCommand().trimmed();
-    if(!wrapperCommandStr.isEmpty())
-    {
+    if (!wrapperCommandStr.isEmpty()) {
         auto wrapperArgs = Commandline::splitArgs(wrapperCommandStr);
         auto wrapperCommand = wrapperArgs.takeFirst();
         auto realWrapperCommand = QStandardPaths::findExecutable(wrapperCommand);
-        if (realWrapperCommand.isEmpty())
-        {
-            const char *reason = QT_TR_NOOP("The wrapper command \"%1\" couldn't be found.");
+        if (realWrapperCommand.isEmpty()) {
+            const char* reason = QT_TR_NOOP("The wrapper command \"%1\" couldn't be found.");
             emit logLine(QString(reason).arg(wrapperCommand), MessageLevel::Fatal);
             emitFailed(tr(reason).arg(wrapperCommand));
             return;
@@ -175,18 +143,14 @@ void LauncherPartLaunch::executeTask()
         emit logLine("Wrapper command is:\n" + wrapperCommandStr + "\n\n", MessageLevel::Launcher);
         args.prepend(javaPath);
         m_process.start(wrapperCommand, wrapperArgs + args);
-    }
-    else
-    {
+    } else {
         m_process.start(javaPath, args);
     }
 
 #ifdef Q_OS_LINUX
-    if (instance->settings()->get("EnableFeralGamemode").toBool() && APPLICATION->capabilities() & Application::SupportsGameMode)
-    {
+    if (instance->settings()->get("EnableFeralGamemode").toBool() && APPLICATION->capabilities() & Application::SupportsGameMode) {
         auto pid = m_process.processId();
-        if (pid)
-        {
+        if (pid) {
             gamemode_request_start_for(pid);
         }
     }
@@ -195,47 +159,42 @@ void LauncherPartLaunch::executeTask()
 
 void LauncherPartLaunch::on_state(LoggedProcess::State state)
 {
-    switch(state)
-    {
-        case LoggedProcess::FailedToStart:
-        {
+    switch (state) {
+        case LoggedProcess::FailedToStart: {
             //: Error message displayed if instace can't start
-            const char *reason = QT_TR_NOOP("Could not launch Minecraft!");
+            const char* reason = QT_TR_NOOP("Could not launch Minecraft!");
             emit logLine(reason, MessageLevel::Fatal);
             emitFailed(tr(reason));
             return;
         }
         case LoggedProcess::Aborted:
-        case LoggedProcess::Crashed:
-        {
+        case LoggedProcess::Crashed: {
             m_parent->setPid(-1);
             emitFailed(tr("Game crashed."));
             return;
         }
-        case LoggedProcess::Finished:
-        {
+        case LoggedProcess::Finished: {
             auto instance = m_parent->instance();
             if (instance->settings()->get("CloseAfterLaunch").toBool())
                 APPLICATION->showMainWindow();
 
             m_parent->setPid(-1);
+            m_parent->instance()->setMinecraftRunning(false);
             // if the exit code wasn't 0, report this as a crash
             auto exitCode = m_process.exitCode();
-            if(exitCode != 0)
-            {
+            if (exitCode != 0) {
                 emitFailed(tr("Game crashed."));
                 return;
             }
-            //FIXME: make this work again
-            // m_postlaunchprocess.processEnvironment().insert("INST_EXITCODE", QString(exitCode));
-            // run post-exit
+            // FIXME: make this work again
+            //  m_postlaunchprocess.processEnvironment().insert("INST_EXITCODE", QString(exitCode));
+            //  run post-exit
             emitSucceeded();
             break;
         }
         case LoggedProcess::Running:
             emit logLine(QString("Minecraft process ID: %1\n\n").arg(m_process.processId()), MessageLevel::Launcher);
             m_parent->setPid(m_process.processId());
-            m_parent->instance()->setLastLaunch();
             // send the launch script to the launcher part
             m_process.write(m_launchScript.toUtf8());
 
@@ -247,15 +206,15 @@ void LauncherPartLaunch::on_state(LoggedProcess::State state)
     }
 }
 
-void LauncherPartLaunch::setWorkingDirectory(const QString &wd)
+void LauncherPartLaunch::setWorkingDirectory(const QString& wd)
 {
     m_process.setWorkingDirectory(wd);
 }
 
 void LauncherPartLaunch::proceed()
 {
-    if(mayProceed)
-    {
+    if (mayProceed) {
+        m_parent->instance()->setMinecraftRunning(true);
         QString launchString("launch\n");
         m_process.write(launchString.toUtf8());
         mayProceed = false;
@@ -264,17 +223,13 @@ void LauncherPartLaunch::proceed()
 
 bool LauncherPartLaunch::abort()
 {
-    if(mayProceed)
-    {
+    if (mayProceed) {
         mayProceed = false;
         QString launchString("abort\n");
         m_process.write(launchString.toUtf8());
-    }
-    else
-    {
+    } else {
         auto state = m_process.state();
-        if (state == LoggedProcess::Running || state == LoggedProcess::Starting)
-        {
+        if (state == LoggedProcess::Running || state == LoggedProcess::Starting) {
             m_process.kill();
         }
     }

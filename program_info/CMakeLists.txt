@@ -14,8 +14,8 @@ set(Launcher_DisplayName "Prism Launcher")
 set(Launcher_Name "${Launcher_CommonName}" PARENT_SCOPE)
 set(Launcher_DisplayName "${Launcher_DisplayName}" PARENT_SCOPE)
 
-set(Launcher_Copyright "Prism Launcher Contributors\\n© 2021-2022 PolyMC Contributors \\n© 2012-2021 MultiMC Contributors")
-set(Launcher_Copyright_Mac "Prism Launcher Contributors, © 2021-2022 PolyMC Contributors and © 2012-2021 MultiMC Contributors" PARENT_SCOPE)
+set(Launcher_Copyright "© 2022-2024 Prism Launcher Contributors\\n© 2021-2022 PolyMC Contributors\\n© 2012-2021 MultiMC Contributors")
+set(Launcher_Copyright_Mac "© 2022-2024 Prism Launcher Contributors, © 2021-2022 PolyMC Contributors and © 2012-2021 MultiMC Contributors" PARENT_SCOPE)
 set(Launcher_Copyright "${Launcher_Copyright}" PARENT_SCOPE)
 set(Launcher_Domain "prismlauncher.org" PARENT_SCOPE)
 set(Launcher_UserAgent "${Launcher_CommonName}/${Launcher_VERSION_NAME}" PARENT_SCOPE)
@@ -41,6 +41,31 @@ configure_file(org.prismlauncher.PrismLauncher.metainfo.xml.in org.prismlauncher
 configure_file(prismlauncher.rc.in prismlauncher.rc @ONLY)
 configure_file(prismlauncher.manifest.in prismlauncher.manifest @ONLY)
 configure_file(prismlauncher.ico prismlauncher.ico COPYONLY)
+
+if(MSVC)
+    set(Launcher_MSVC_Redist_NSIS_Section [=[
+!ifdef haveNScurl
+Section "Visual Studio Runtime"
+    Var /GLOBAL vc_redist_exe
+    ${If} ${IsNativeARM64}
+        StrCpy $vc_redist_exe "vc_redist.arm64.exe"
+    ${Else}
+        StrCpy $vc_redist_exe "vc_redist.x64.exe"
+    ${EndIf}
+    DetailPrint 'Downloading Microsoft Visual C++ Redistributable...'
+    NScurl::http GET "https://aka.ms/vs/17/release/$vc_redist_exe" "$INSTDIR\vc_redist\$vc_redist_exe" /INSIST /CANCEL /Zone.Identifier /END
+    Pop $0
+    ${If} $0 == "OK"
+        DetailPrint "Download successful"
+        ExecWait "$INSTDIR\vc_redist\$vc_redist_exe /install /passive /norestart"
+    ${Else}
+        DetailPrint "Download failed with error $0"
+    ${EndIf}
+SectionEnd
+!endif
+]=])
+endif()
+
 configure_file(win_install.nsi.in win_install.nsi @ONLY)
 
 if(SCDOC_FOUND)

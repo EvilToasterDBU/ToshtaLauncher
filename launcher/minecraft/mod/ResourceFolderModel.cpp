@@ -4,6 +4,7 @@
 #include <QCoreApplication>
 #include <QDebug>
 #include <QFileInfo>
+#include <QHeaderView>
 #include <QIcon>
 #include <QMenu>
 #include <QMimeData>
@@ -15,6 +16,7 @@
 #include "FileSystem.h"
 
 #include "QVariantUtils.h"
+#include "StringUtils.h"
 #include "minecraft/mod/tasks/BasicFolderLoadTask.h"
 
 #include "settings/Setting.h"
@@ -33,6 +35,9 @@ ResourceFolderModel::ResourceFolderModel(QDir dir, BaseInstance* instance, QObje
 
     connect(&m_watcher, &QFileSystemWatcher::directoryChanged, this, &ResourceFolderModel::directoryChanged);
     connect(&m_helper_thread_task, &ConcurrentTask::finished, this, [this] { m_helper_thread_task.clear(); });
+    if (APPLICATION_DYN) {  // in tests the application macro doesn't work
+        m_helper_thread_task.setMaxConcurrent(APPLICATION->settings()->get("NumberOfConcurrentTasks").toInt());
+    }
 }
 
 ResourceFolderModel::~ResourceFolderModel()
@@ -41,7 +46,7 @@ ResourceFolderModel::~ResourceFolderModel()
         QCoreApplication::processEvents();
 }
 
-bool ResourceFolderModel::startWatching(const QStringList paths)
+bool ResourceFolderModel::startWatching(const QStringList& paths)
 {
     if (m_is_watching)
         return false;
@@ -60,7 +65,7 @@ bool ResourceFolderModel::startWatching(const QStringList paths)
     return m_is_watching;
 }
 
-bool ResourceFolderModel::stopWatching(const QStringList paths)
+bool ResourceFolderModel::stopWatching(const QStringList& paths)
 {
     if (!m_is_watching)
         return false;
@@ -106,7 +111,7 @@ bool ResourceFolderModel::installResource(QString original_path)
         case ResourceType::ZIPFILE:
         case ResourceType::LITEMOD: {
             if (QFile::exists(new_path) || QFile::exists(new_path + QString(".disabled"))) {
-                if (!QFile::remove(new_path)) {
+                if (!FS::deletePath(new_path)) {
                     qCritical() << "Cleaning up new location (" << new_path << ") was unsuccessful!";
                     return false;
                 }
@@ -209,9 +214,6 @@ bool ResourceFolderModel::setResourceEnabled(const QModelIndexList& indexes, Ena
         }
 
         auto new_id = resource->internal_id();
-        if (m_resources_index.contains(new_id)) {
-            // FIXME: https://github.com/PolyMC/PolyMC/issues/550
-        }
 
         m_resources_index.remove(old_id);
         m_resources_index[new_id] = row;
@@ -276,10 +278,14 @@ void ResourceFolderModel::resolveResource(Resource* res)
 
     connect(
         task.get(), &Task::succeeded, this, [=] { onParseSucceeded(ticket, res->internal_id()); }, Qt::ConnectionType::QueuedConnection);
+    connect(task.get(), &Task::failed, this, [=] { onParseFailed(ticket, res->internal_id()); }, Qt::ConnectionType::QueuedConnection);
     connect(
-        task.get(), &Task::failed, this, [=] { onParseFailed(ticket, res->internal_id()); }, Qt::ConnectionType::QueuedConnection);
-    connect(
-        task.get(), &Task::finished, this, [=] { m_active_parse_tasks.remove(ticket); }, Qt::ConnectionType::QueuedConnection);
+        task.get(), &Task::finished, this,
+        [=] {
+            m_active_parse_tasks.remove(ticket);
+            emit parseFinished();
+        },
+        Qt::ConnectionType::QueuedConnection);
 
     m_helper_thread_task.addTask(task);
 
@@ -406,15 +412,17 @@ QVariant ResourceFolderModel::data(const QModelIndex& index, int role) const
     switch (role) {
         case Qt::DisplayRole:
             switch (column) {
-                case NAME_COLUMN:
+                case NameColumn:
                     return m_resources[row]->name();
-                case DATE_COLUMN:
+                case DateColumn:
                     return m_resources[row]->dateTimeChanged();
+                case SizeColumn:
+                    return m_resources[row]->sizeStr();
                 default:
                     return {};
             }
         case Qt::ToolTipRole:
-            if (column == NAME_COLUMN) {
+            if (column == NameColumn) {
                 if (at(row).isSymLinkUnder(instDirPath())) {
                     return m_resources[row]->internal_id() +
                            tr("\nWarning: This resource is symbolically linked from elsewhere. Editing it will also change the original."
@@ -430,14 +438,14 @@ QVariant ResourceFolderModel::data(const QModelIndex& index, int role) const
 
             return m_resources[row]->internal_id();
         case Qt::DecorationRole: {
-            if (column == NAME_COLUMN && (at(row).isSymLinkUnder(instDirPath()) || at(row).isMoreThanOneHardLink()))
+            if (column == NameColumn && (at(row).isSymLinkUnder(instDirPath()) || at(row).isMoreThanOneHardLink()))
                 return APPLICATION->getThemedIcon("status-yellow");
 
             return {};
         }
         case Qt::CheckStateRole:
             switch (column) {
-                case ACTIVE_COLUMN:
+                case ActiveColumn:
                     return m_resources[row]->enabled() ? Qt::Checked : Qt::Unchecked;
                 default:
                     return {};
@@ -447,7 +455,7 @@ QVariant ResourceFolderModel::data(const QModelIndex& index, int role) const
     }
 }
 
-bool ResourceFolderModel::setData(const QModelIndex& index, const QVariant& value, int role)
+bool ResourceFolderModel::setData(const QModelIndex& index, [[maybe_unused]] const QVariant& value, int role)
 {
     int row = index.row();
     if (row < 0 || row >= rowCount(index.parent()) || !index.isValid())
@@ -456,9 +464,9 @@ bool ResourceFolderModel::setData(const QModelIndex& index, const QVariant& valu
     if (role == Qt::CheckStateRole) {
         if (m_instance != nullptr && m_instance->isRunning()) {
             auto response =
-                CustomMessageBox::selectable(nullptr, "Confirm toggle",
-                                             "If you enable/disable this resource while the game is running it may crash your game.\n"
-                                             "Are you sure you want to do this?",
+                CustomMessageBox::selectable(nullptr, tr("Confirm toggle"),
+                                             tr("If you enable/disable this resource while the game is running it may crash your game.\n"
+                                                "Are you sure you want to do this?"),
                                              QMessageBox::Warning, QMessageBox::Yes | QMessageBox::No, QMessageBox::No)
                     ->exec();
 
@@ -471,29 +479,32 @@ bool ResourceFolderModel::setData(const QModelIndex& index, const QVariant& valu
     return false;
 }
 
-QVariant ResourceFolderModel::headerData(int section, Qt::Orientation orientation, int role) const
+QVariant ResourceFolderModel::headerData(int section, [[maybe_unused]] Qt::Orientation orientation, int role) const
 {
     switch (role) {
         case Qt::DisplayRole:
             switch (section) {
-                case ACTIVE_COLUMN:
-                case NAME_COLUMN:
-                case DATE_COLUMN:
+                case ActiveColumn:
+                case NameColumn:
+                case DateColumn:
+                case SizeColumn:
                     return columnNames().at(section);
                 default:
                     return {};
             }
         case Qt::ToolTipRole: {
             switch (section) {
-                case ACTIVE_COLUMN:
+                case ActiveColumn:
                     //: Here, resource is a generic term for external resources, like Mods, Resource Packs, Shader Packs, etc.
                     return tr("Is the resource enabled?");
-                case NAME_COLUMN:
+                case NameColumn:
                     //: Here, resource is a generic term for external resources, like Mods, Resource Packs, Shader Packs, etc.
                     return tr("The name of the resource.");
-                case DATE_COLUMN:
+                case DateColumn:
                     //: Here, resource is a generic term for external resources, like Mods, Resource Packs, Shader Packs, etc.
                     return tr("The date and time this resource was last changed (or added).");
+                case SizeColumn:
+                    return tr("The size of the resource.");
                 default:
                     return {};
             }
@@ -512,37 +523,26 @@ void ResourceFolderModel::setupHeaderAction(QAction* act, int column)
     act->setText(columnNames().at(column));
 }
 
-void ResourceFolderModel::saveHiddenColumn(int column, bool hidden)
+void ResourceFolderModel::saveColumns(QTreeView* tree)
 {
-    auto const setting_name = QString("UI/%1_Page/HiddenColumns").arg(id());
-    auto setting = (m_instance->settings()->contains(setting_name)) ?
-        m_instance->settings()->getSetting(setting_name) : m_instance->settings()->registerSetting(setting_name);
+    auto const setting_name = QString("UI/%1_Page/Columns").arg(id());
+    auto setting = (m_instance->settings()->contains(setting_name)) ? m_instance->settings()->getSetting(setting_name)
+                                                                    : m_instance->settings()->registerSetting(setting_name);
 
-    auto hiddenColumns = setting->get().toStringList();
-    auto name = columnNames(false).at(column);
-    auto index = hiddenColumns.indexOf(name);
-    if (index >= 0 && !hidden) {
-        hiddenColumns.removeAt(index);
-    } else if ( index < 0 && hidden) {
-        hiddenColumns.append(name);
-    }
-    setting->set(hiddenColumns);
+    setting->set(tree->header()->saveState());
 }
 
-void ResourceFolderModel::loadHiddenColumns(QTreeView *tree)
+void ResourceFolderModel::loadColumns(QTreeView* tree)
 {
-    auto const setting_name = QString("UI/%1_Page/HiddenColumns").arg(id());
-    auto setting = (m_instance->settings()->contains(setting_name)) ?
-        m_instance->settings()->getSetting(setting_name) : m_instance->settings()->registerSetting(setting_name);
-
-    auto hiddenColumns = setting->get().toStringList();
-    auto col_names = columnNames(false);
-    for (auto col_name : hiddenColumns) {
-        auto index = col_names.indexOf(col_name);
-        if (index >= 0)
-            tree->setColumnHidden(index, true);
+    for (auto i = 0; i < m_columnsHiddenByDefault.size(); ++i) {
+        tree->setColumnHidden(i, m_columnsHiddenByDefault[i]);
     }
 
+    auto const setting_name = QString("UI/%1_Page/Columns").arg(id());
+    auto setting = (m_instance->settings()->contains(setting_name)) ? m_instance->settings()->getSetting(setting_name)
+                                                                    : m_instance->settings()->registerSetting(setting_name);
+
+    tree->header()->restoreState(setting->get().toByteArray());
 }
 
 QMenu* ResourceFolderModel::createHeaderContextMenu(QTreeView* tree)
@@ -552,23 +552,25 @@ QMenu* ResourceFolderModel::createHeaderContextMenu(QTreeView* tree)
     menu->addSeparator()->setText(tr("Show / Hide Columns"));
 
     for (int col = 0; col < columnCount(); ++col) {
+        // Skip creating actions for columns that should not be hidden
+        if (!m_columnsHideable.at(col))
+            continue;
         auto act = new QAction(menu);
         setupHeaderAction(act, col);
 
         act->setCheckable(true);
         act->setChecked(!tree->isColumnHidden(col));
 
-        connect(act, &QAction::toggled, tree, [this, col, tree](bool toggled){
+        connect(act, &QAction::toggled, tree, [this, col, tree](bool toggled) {
             tree->setColumnHidden(col, !toggled);
-            for(int c = 0; c < columnCount(); ++c) {
+            for (int c = 0; c < columnCount(); ++c) {
                 if (m_column_resize_modes.at(c) == QHeaderView::ResizeToContents)
                     tree->resizeColumnToContents(c);
             }
-            saveHiddenColumn(col, !toggled);
+            saveColumns(tree);
         });
 
         menu->addAction(act);
-
     }
 
     return menu;
@@ -586,7 +588,8 @@ SortType ResourceFolderModel::columnToSortKey(size_t column) const
 }
 
 /* Standard Proxy Model for createFilterProxyModel */
-[[nodiscard]] bool ResourceFolderModel::ProxyModel::filterAcceptsRow(int source_row, const QModelIndex& source_parent) const
+[[nodiscard]] bool ResourceFolderModel::ProxyModel::filterAcceptsRow(int source_row,
+                                                                     [[maybe_unused]] const QModelIndex& source_parent) const
 {
     auto* model = qobject_cast<ResourceFolderModel*>(sourceModel());
     if (!model)
@@ -612,15 +615,36 @@ SortType ResourceFolderModel::columnToSortKey(size_t column) const
     auto const& resource_right = model->at(source_right.row());
 
     auto compare_result = resource_left.compare(resource_right, column_sort_key);
-    if (compare_result.first == 0)
+    if (compare_result == 0)
         return QSortFilterProxyModel::lessThan(source_left, source_right);
 
-    if (compare_result.second || sortOrder() != Qt::DescendingOrder)
-        return (compare_result.first < 0);
-    return (compare_result.first > 0);
+    return compare_result < 0;
 }
 
 QString ResourceFolderModel::instDirPath() const
 {
     return QFileInfo(m_instance->instanceRoot()).absoluteFilePath();
+}
+
+void ResourceFolderModel::onParseFailed(int ticket, QString resource_id)
+{
+    auto iter = m_active_parse_tasks.constFind(ticket);
+    if (iter == m_active_parse_tasks.constEnd())
+        return;
+
+    auto removed_index = m_resources_index[resource_id];
+    auto removed_it = m_resources.begin() + removed_index;
+    Q_ASSERT(removed_it != m_resources.end());
+
+    beginRemoveRows(QModelIndex(), removed_index, removed_index);
+    m_resources.erase(removed_it);
+
+    // update index
+    m_resources_index.clear();
+    int idx = 0;
+    for (auto const& mod : qAsConst(m_resources)) {
+        m_resources_index[mod->internal_id()] = idx;
+        idx++;
+    }
+    endRemoveRows();
 }

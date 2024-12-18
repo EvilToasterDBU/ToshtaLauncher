@@ -1,37 +1,70 @@
 #pragma once
 
-#include <memory>
-#include <QList>
-#include <QJsonDocument>
 #include <QDateTime>
-#include "meta/JsonFormat.h"
+#include <QJsonDocument>
+#include <QList>
+#include <memory>
+#include <optional>
+#include <variant>
 #include "ProblemProvider.h"
 #include "QObjectPtr.h"
+#include "meta/JsonFormat.h"
+#include "modplatform/ModIndex.h"
 
 class PackProfile;
 class LaunchProfile;
-namespace Meta
-{
-    class Version;
-    class VersionList;
-}
+namespace Meta {
+class Version;
+class VersionList;
+}  // namespace Meta
 class VersionFile;
 
-class Component : public QObject, public ProblemProvider
-{
-Q_OBJECT
-public:
-    Component(PackProfile * parent, const QString &uid);
+struct UpdateActionChangeVersion {
+    /// version to change to
+    QString targetVersion;
+};
+struct UpdateActionLatestRecommendedCompatible {
+    /// Parent uid
+    QString parentUid;
+    QString parentName;
+    /// Parent version
+    QString version;
+    ///
+};
+struct UpdateActionRemove {};
+struct UpdateActionImportantChanged {
+    QString oldVersion;
+};
+
+using UpdateActionNone = std::monostate;
+
+using UpdateAction = std::variant<UpdateActionNone,
+                                  UpdateActionChangeVersion,
+                                  UpdateActionLatestRecommendedCompatible,
+                                  UpdateActionRemove,
+                                  UpdateActionImportantChanged>;
+
+struct ModloaderMapEntry {
+    ModPlatform::ModLoaderType type;
+    QStringList knownConflictingComponents;
+};
+
+class Component : public QObject, public ProblemProvider {
+    Q_OBJECT
+   public:
+    Component(PackProfile* parent, const QString& uid);
 
     // DEPRECATED: remove these constructors?
-    Component(PackProfile * parent, std::shared_ptr<Meta::Version> version);
-    Component(PackProfile * parent, const QString & uid, std::shared_ptr<VersionFile> file);
+    Component(PackProfile* parent, const QString& uid, std::shared_ptr<VersionFile> file);
 
-    virtual ~Component(){};
-    void applyTo(LaunchProfile *profile);
+    virtual ~Component() {}
+
+    static const QMap<QString, ModloaderMapEntry> KNOWN_MODLOADERS;
+
+    void applyTo(LaunchProfile* profile);
 
     bool isEnabled();
-    bool setEnabled (bool state);
+    bool setEnabled(bool state);
     bool canBeDisabled();
 
     bool isMoveable();
@@ -40,6 +73,8 @@ public:
     bool isRemovable();
     bool isCustom();
     bool isVersionChangeable();
+    bool isKnownModloader();
+    QStringList knownConflictingComponents();
 
     // DEPRECATED: explicit numeric order values, used for loading old non-component config. TODO: refactor and move to migration code
     void setOrder(int order);
@@ -56,23 +91,30 @@ public:
     std::shared_ptr<class VersionFile> getVersionFile() const;
     std::shared_ptr<class Meta::VersionList> getVersionList() const;
 
-    void setImportant (bool state);
-
+    void setImportant(bool state);
 
     const QList<PatchProblem> getProblems() const override;
     ProblemSeverity getProblemSeverity() const override;
+    void addComponentProblem(ProblemSeverity severity, const QString& description);
+    void resetComponentProblems();
 
-    void setVersion(const QString & version);
+    void setVersion(const QString& version);
     bool customize();
     bool revert();
 
     void updateCachedData();
 
-signals:
+    void waitLoadMeta();
+
+    void setUpdateAction(UpdateAction action);
+    void clearUpdateAction();
+    UpdateAction getUpdateAction();
+
+   signals:
     void dataChanged();
 
-public: /* data */
-    PackProfile * m_parent;
+   public: /* data */
+    PackProfile* m_parent;
 
     // BEGIN: persistent component list properties
     /// ID of the component
@@ -105,6 +147,11 @@ public: /* data */
     std::shared_ptr<Meta::Version> m_metaVersion;
     std::shared_ptr<VersionFile> m_file;
     bool m_loaded = false;
+
+   private:
+    QList<PatchProblem> m_componentProblems;
+    ProblemSeverity m_componentProblemSeverity = ProblemSeverity::None;
+    UpdateAction m_updateAction = UpdateAction{ UpdateActionNone{} };
 };
 
-typedef shared_qobject_ptr<Component> ComponentPtr;
+using ComponentPtr = shared_qobject_ptr<Component>;

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 /*
- *  PolyMC - Minecraft Launcher
+ *  Prism Launcher - Minecraft Launcher
  *  Copyright (C) 2022 Sefa Eyeoglu <contact@scrumplex.net>
  *
  *  This program is free software: you can redistribute it and/or modify
@@ -33,22 +33,31 @@
  *      limitations under the License.
  */
 
-#include <meta/VersionList.h>
-#include <meta/Index.h>
 #include "Component.h"
+#include <meta/Index.h>
+#include <meta/VersionList.h>
 
 #include <QSaveFile>
 
-#include "meta/Version.h"
-#include "VersionFile.h"
-#include "minecraft/PackProfile.h"
+#include "Application.h"
 #include "FileSystem.h"
 #include "OneSixVersionFormat.h"
-#include "Application.h"
+#include "VersionFile.h"
+#include "meta/Version.h"
+#include "minecraft/Component.h"
+#include "minecraft/PackProfile.h"
 
 #include <assert.h>
 
-Component::Component(PackProfile * parent, const QString& uid)
+const QMap<QString, ModloaderMapEntry> Component::KNOWN_MODLOADERS = {
+    { "net.neoforged", { ModPlatform::NeoForge, { "net.minecraftforge", "net.fabricmc.fabric-loader", "org.quiltmc.quilt-loader" } } },
+    { "net.minecraftforge", { ModPlatform::Forge, { "net.neoforged", "net.fabricmc.fabric-loader", "org.quiltmc.quilt-loader" } } },
+    { "net.fabricmc.fabric-loader", { ModPlatform::Fabric, { "net.minecraftforge", "net.neoforged", "org.quiltmc.quilt-loader" } } },
+    { "org.quiltmc.quilt-loader", { ModPlatform::Quilt, { "net.minecraftforge", "net.neoforged", "net.fabricmc.fabric-loader" } } },
+    { "com.mumfrey.liteloader", { ModPlatform::LiteLoader, {} } }
+};
+
+Component::Component(PackProfile* parent, const QString& uid)
 {
     assert(parent);
     m_parent = parent;
@@ -56,19 +65,7 @@ Component::Component(PackProfile * parent, const QString& uid)
     m_uid = uid;
 }
 
-Component::Component(PackProfile * parent, std::shared_ptr<Meta::Version> version)
-{
-    assert(parent);
-    m_parent = parent;
-
-    m_metaVersion = version;
-    m_uid = version->uid();
-    m_version = m_cachedVersion = version->version();
-    m_cachedName = version->name();
-    m_loaded = version->isLoaded();
-}
-
-Component::Component(PackProfile * parent, const QString& uid, std::shared_ptr<VersionFile> file)
+Component::Component(PackProfile* parent, const QString& uid, std::shared_ptr<VersionFile> file)
 {
     assert(parent);
     m_parent = parent;
@@ -88,33 +85,22 @@ std::shared_ptr<Meta::Version> Component::getMeta()
 void Component::applyTo(LaunchProfile* profile)
 {
     // do not apply disabled components
-    if(!isEnabled())
-    {
+    if (!isEnabled()) {
         return;
     }
     auto vfile = getVersionFile();
-    if(vfile)
-    {
+    if (vfile) {
         vfile->applyTo(profile, m_parent->runtimeContext());
-    }
-    else
-    {
+    } else {
         profile->applyProblemSeverity(getProblemSeverity());
     }
 }
 
 std::shared_ptr<class VersionFile> Component::getVersionFile() const
 {
-    if(m_metaVersion)
-    {
-        if(!m_metaVersion->isLoaded())
-        {
-            m_metaVersion->load(Net::Mode::Online);
-        }
+    if (m_metaVersion) {
         return m_metaVersion->data();
-    }
-    else
-    {
+    } else {
         return m_file;
     }
 }
@@ -122,8 +108,7 @@ std::shared_ptr<class VersionFile> Component::getVersionFile() const
 std::shared_ptr<class Meta::VersionList> Component::getVersionList() const
 {
     // FIXME: what if the metadata index isn't loaded yet?
-    if(APPLICATION->metadataIndex()->hasUid(m_uid))
-    {
+    if (APPLICATION->metadataIndex()->hasUid(m_uid)) {
         return APPLICATION->metadataIndex()->get(m_uid);
     }
     return nullptr;
@@ -131,48 +116,51 @@ std::shared_ptr<class Meta::VersionList> Component::getVersionList() const
 
 int Component::getOrder()
 {
-    if(m_orderOverride)
+    if (m_orderOverride)
         return m_order;
 
     auto vfile = getVersionFile();
-    if(vfile)
-    {
+    if (vfile) {
         return vfile->order;
     }
     return 0;
 }
+
 void Component::setOrder(int order)
 {
     m_orderOverride = true;
     m_order = order;
 }
+
 QString Component::getID()
 {
     return m_uid;
 }
+
 QString Component::getName()
 {
     if (!m_cachedName.isEmpty())
         return m_cachedName;
     return m_uid;
 }
+
 QString Component::getVersion()
 {
     return m_cachedVersion;
 }
+
 QString Component::getFilename()
 {
     return m_parent->patchFilePathForUid(m_uid);
 }
+
 QDateTime Component::getReleaseDateTime()
 {
-    if(m_metaVersion)
-    {
+    if (m_metaVersion) {
         return m_metaVersion->time();
     }
     auto vfile = getVersionFile();
-    if(vfile)
-    {
+    if (vfile) {
         return vfile->releaseTime;
     }
     // FIXME: fake
@@ -192,12 +180,10 @@ bool Component::canBeDisabled()
 bool Component::setEnabled(bool state)
 {
     bool intendedDisabled = !state;
-    if (!canBeDisabled())
-    {
+    if (!canBeDisabled()) {
         intendedDisabled = false;
     }
-    if(intendedDisabled != m_disabled)
-    {
+    if (intendedDisabled != m_disabled) {
         m_disabled = intendedDisabled;
         emit dataChanged();
         return true;
@@ -212,53 +198,59 @@ bool Component::isCustom()
 
 bool Component::isCustomizable()
 {
-    if(m_metaVersion)
-    {
-        if(getVersionFile())
-        {
-            return true;
-        }
-    }
-    return false;
+    return m_metaVersion && getVersionFile();
 }
+
 bool Component::isRemovable()
 {
     return !m_important;
 }
+
 bool Component::isRevertible()
 {
-    if (isCustom())
-    {
-        if(APPLICATION->metadataIndex()->hasUid(m_uid))
-        {
+    if (isCustom()) {
+        if (APPLICATION->metadataIndex()->hasUid(m_uid)) {
             return true;
         }
     }
     return false;
 }
+
 bool Component::isMoveable()
 {
     // HACK, FIXME: this was too dumb and wouldn't follow dependency constraints anyway. For now hardcoded to 'true'.
     return true;
 }
+
 bool Component::isVersionChangeable()
 {
     auto list = getVersionList();
-    if(list)
-    {
-        if(!list->isLoaded())
-        {
-            list->load(Net::Mode::Online);
-        }
+    if (list) {
+        list->waitToLoad();
         return list->count() != 0;
     }
     return false;
 }
 
+bool Component::isKnownModloader()
+{
+    auto iter = KNOWN_MODLOADERS.find(m_uid);
+    return iter != KNOWN_MODLOADERS.cend();
+}
+
+QStringList Component::knownConflictingComponents()
+{
+    auto iter = KNOWN_MODLOADERS.find(m_uid);
+    if (iter != KNOWN_MODLOADERS.cend()) {
+        return (*iter).knownConflictingComponents;
+    } else {
+        return {};
+    }
+}
+
 void Component::setImportant(bool state)
 {
-    if(m_important != state)
-    {
+    if (m_important != state) {
         m_important = state;
         emit dataChanged();
     }
@@ -267,9 +259,9 @@ void Component::setImportant(bool state)
 ProblemSeverity Component::getProblemSeverity() const
 {
     auto file = getVersionFile();
-    if(file)
-    {
-        return file->getProblemSeverity();
+    if (file) {
+        auto severity = file->getProblemSeverity();
+        return m_componentProblemSeverity > severity ? m_componentProblemSeverity : severity;
     }
     return ProblemSeverity::Error;
 }
@@ -277,49 +269,58 @@ ProblemSeverity Component::getProblemSeverity() const
 const QList<PatchProblem> Component::getProblems() const
 {
     auto file = getVersionFile();
-    if(file)
-    {
-        return file->getProblems();
+    if (file) {
+        auto problems = file->getProblems();
+        problems.append(m_componentProblems);
+        return problems;
     }
-    return {{ProblemSeverity::Error, QObject::tr("Patch is not loaded yet.")}};
+    return { { ProblemSeverity::Error, QObject::tr("Patch is not loaded yet.") } };
+}
+
+void Component::addComponentProblem(ProblemSeverity severity, const QString& description)
+{
+    if (severity > m_componentProblemSeverity) {
+        m_componentProblemSeverity = severity;
+    }
+    m_componentProblems.append({ severity, description });
+
+    emit dataChanged();
+}
+
+void Component::resetComponentProblems()
+{
+    m_componentProblems.clear();
+    m_componentProblemSeverity = ProblemSeverity::None;
+
+    emit dataChanged();
 }
 
 void Component::setVersion(const QString& version)
 {
-    if(version == m_version)
-    {
+    if (version == m_version) {
         return;
     }
     m_version = version;
-    if(m_loaded)
-    {
+    if (m_loaded) {
         // we are loaded and potentially have state to invalidate
-        if(m_file)
-        {
+        if (m_file) {
             // we have a file... explicit version has been changed and there is nothing else to do.
-        }
-        else
-        {
+        } else {
             // we don't have a file, therefore we are loaded with metadata
             m_cachedVersion = version;
             // see if the meta version is loaded
             auto metaVersion = APPLICATION->metadataIndex()->get(m_uid, version);
-            if(metaVersion->isLoaded())
-            {
+            if (metaVersion->isLoaded()) {
                 // if yes, we can continue with that.
                 m_metaVersion = metaVersion;
-            }
-            else
-            {
+            } else {
                 // if not, we need loading
                 m_metaVersion.reset();
                 m_loaded = false;
             }
             updateCachedData();
         }
-    }
-    else
-    {
+    } else {
         // not loaded... assume it will be sorted out later by the update task
     }
     emit dataChanged();
@@ -327,41 +328,33 @@ void Component::setVersion(const QString& version)
 
 bool Component::customize()
 {
-    if(isCustom())
-    {
+    if (isCustom()) {
         return false;
     }
 
     auto filename = getFilename();
-    if(!FS::ensureFilePathExists(filename))
-    {
+    if (!FS::ensureFilePathExists(filename)) {
         return false;
     }
     // FIXME: get rid of this try-catch.
-    try
-    {
+    try {
         QSaveFile jsonFile(filename);
-        if(!jsonFile.open(QIODevice::WriteOnly))
-        {
+        if (!jsonFile.open(QIODevice::WriteOnly)) {
             return false;
         }
         auto vfile = getVersionFile();
-        if(!vfile)
-        {
+        if (!vfile) {
             return false;
         }
         auto document = OneSixVersionFormat::versionFileToJson(vfile);
         jsonFile.write(document.toJson());
-        if(!jsonFile.commit())
-        {
+        if (!jsonFile.commit()) {
             return false;
         }
         m_file = vfile;
         m_metaVersion.reset();
         emit dataChanged();
-    }
-    catch (const Exception &error)
-    {
+    } catch (const Exception& error) {
         qWarning() << "Version could not be loaded:" << error.cause();
     }
     return true;
@@ -369,31 +362,25 @@ bool Component::customize()
 
 bool Component::revert()
 {
-    if(!isCustom())
-    {
+    if (!isCustom()) {
         // already not custom
         return true;
     }
     auto filename = getFilename();
     bool result = true;
     // just kill the file and reload
-    if(QFile::exists(filename))
-    {
-        result = QFile::remove(filename);
+    if (QFile::exists(filename)) {
+        result = FS::deletePath(filename);
     }
-    if(result)
-    {
+    if (result) {
         // file gone...
         m_file.reset();
 
         // check local cache for metadata...
         auto version = APPLICATION->metadataIndex()->get(m_uid, m_version);
-        if(version->isLoaded())
-        {
+        if (version->isLoaded()) {
             m_metaVersion = version;
-        }
-        else
-        {
+        } else {
             m_metaVersion.reset();
             m_loaded = false;
         }
@@ -407,23 +394,19 @@ bool Component::revert()
  * By default, only uids are compared for set operations.
  * This compares all fields of the Require structs in the sets.
  */
-static bool deepCompare(const std::set<Meta::Require> & a, const std::set<Meta::Require> & b)
+static bool deepCompare(const std::set<Meta::Require>& a, const std::set<Meta::Require>& b)
 {
     // NOTE: this needs to be rewritten if the type of Meta::RequireSet changes
-    if(a.size() != b.size())
-    {
+    if (a.size() != b.size()) {
         return false;
     }
-    for(const auto & reqA :a)
-    {
-        const auto &iter2 = b.find(reqA);
-        if(iter2 == b.cend())
-        {
+    for (const auto& reqA : a) {
+        const auto& iter2 = b.find(reqA);
+        if (iter2 == b.cend()) {
             return false;
         }
-        const auto & reqB = *iter2;
-        if(!reqA.deepEquals(reqB))
-        {
+        const auto& reqB = *iter2;
+        if (!reqA.deepEquals(reqB)) {
             return false;
         }
     }
@@ -433,44 +416,68 @@ static bool deepCompare(const std::set<Meta::Require> & a, const std::set<Meta::
 void Component::updateCachedData()
 {
     auto file = getVersionFile();
-    if(file)
-    {
+    if (file) {
         bool changed = false;
-        if(m_cachedName != file->name)
-        {
+        if (m_cachedName != file->name) {
             m_cachedName = file->name;
             changed = true;
         }
-        if(m_cachedVersion != file->version)
-        {
+        if (m_cachedVersion != file->version) {
             m_cachedVersion = file->version;
             changed = true;
         }
-        if(m_cachedVolatile != file->m_volatile)
-        {
+        if (m_cachedVolatile != file->m_volatile) {
             m_cachedVolatile = file->m_volatile;
             changed = true;
         }
-        if(!deepCompare(m_cachedRequires, file->m_requires))
-        {
+        if (!deepCompare(m_cachedRequires, file->m_requires)) {
             m_cachedRequires = file->m_requires;
             changed = true;
         }
-        if(!deepCompare(m_cachedConflicts, file->conflicts))
-        {
+        if (!deepCompare(m_cachedConflicts, file->conflicts)) {
             m_cachedConflicts = file->conflicts;
             changed = true;
         }
-        if(changed)
-        {
+        if (changed) {
             emit dataChanged();
         }
-    }
-    else
-    {
+    } else {
         // in case we removed all the metadata
         m_cachedRequires.clear();
         m_cachedConflicts.clear();
         emit dataChanged();
     }
+}
+
+void Component::waitLoadMeta()
+{
+    if (!m_loaded) {
+        if (!m_metaVersion || !m_metaVersion->isLoaded()) {
+            // wait for the loaded version from meta
+            m_metaVersion = APPLICATION->metadataIndex()->getLoadedVersion(m_uid, m_version);
+        }
+        m_loaded = true;
+        updateCachedData();
+    }
+}
+
+void Component::setUpdateAction(UpdateAction action)
+{
+    m_updateAction = action;
+}
+
+UpdateAction Component::getUpdateAction()
+{
+    return m_updateAction;
+}
+
+void Component::clearUpdateAction()
+{
+    m_updateAction = UpdateAction{ UpdateActionNone{} };
+}
+
+QDebug operator<<(QDebug d, const Component& comp)
+{
+    d << "Component(" << comp.m_uid << " : " << comp.m_cachedVersion << ")";
+    return d;
 }

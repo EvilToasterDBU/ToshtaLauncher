@@ -5,18 +5,28 @@
 #include "InstanceList.h"
 #include "Json.h"
 
+#include "QObjectPtr.h"
+#include "minecraft/MinecraftInstance.h"
 #include "minecraft/PackProfile.h"
 
+#include "minecraft/mod/Mod.h"
+#include "modplatform/EnsureMetadataTask.h"
 #include "modplatform/helpers/OverrideUtils.h"
 
+#include "modplatform/modrinth/ModrinthPackManifest.h"
 #include "net/ChecksumValidator.h"
 
+#include "net/ApiDownload.h"
 #include "net/NetJob.h"
 #include "settings/INISettingsObject.h"
 
 #include "ui/dialogs/CustomMessageBox.h"
+#include "ui/pages/modplatform/OptionalModDialog.h"
 
 #include <QAbstractButton>
+#include <QFileInfo>
+#include <QHash>
+#include <vector>
 
 bool ModrinthCreationTask::abort()
 {
@@ -24,8 +34,8 @@ bool ModrinthCreationTask::abort()
         return false;
 
     m_abort = true;
-    if (m_files_job)
-        m_files_job->abort();
+    if (m_task)
+        m_task->abort();
     return Task::abort();
 }
 
@@ -54,6 +64,7 @@ bool ModrinthCreationTask::updateInstance()
         return false;
 
     auto version_name = inst->getManagedPackVersionName();
+    m_root_path = QFileInfo(inst->gameRoot()).fileName();
     auto version_str = !version_name.isEmpty() ? tr(" (version %1)").arg(version_name) : "";
 
     if (shouldConfirmUpdate()) {
@@ -125,7 +136,7 @@ bool ModrinthCreationTask::updateInstance()
         }
 
         auto old_client_overrides = Override::readOverrides("client-overrides", old_index_folder);
-        for (const auto& entry : old_overrides) {
+        for (const auto& entry : old_client_overrides) {
             if (entry.isEmpty())
                 continue;
             qDebug() << "Scheduling" << entry << "for removal";
@@ -133,17 +144,16 @@ bool ModrinthCreationTask::updateInstance()
         }
     } else {
         // We don't have an old index file, so we may duplicate stuff!
-        auto dialog = CustomMessageBox::selectable(m_parent,
-                tr("No index file."),
-                tr("We couldn't find a suitable index file for the older version. This may cause some of the files to be duplicated. Do you want to continue?"),
-                QMessageBox::Warning, QMessageBox::Ok | QMessageBox::Cancel);
+        auto dialog = CustomMessageBox::selectable(m_parent, tr("No index file."),
+                                                   tr("We couldn't find a suitable index file for the older version. This may cause some "
+                                                      "of the files to be duplicated. Do you want to continue?"),
+                                                   QMessageBox::Warning, QMessageBox::Ok | QMessageBox::Cancel);
 
         if (dialog->exec() == QDialog::DialogCode::Rejected) {
             m_abort = true;
             return false;
         }
     }
-
 
     setOverride(true, inst->id());
     qDebug() << "Will override instance!";
@@ -168,9 +178,9 @@ bool ModrinthCreationTask::createInstance()
     // Keep index file in case we need it some other time (like when changing versions)
     QString new_index_place(FS::PathCombine(parent_folder, "modrinth.index.json"));
     FS::ensureFilePathExists(new_index_place);
-    QFile::rename(index_path, new_index_place);
+    FS::move(index_path, new_index_place);
 
-    auto mcPath = FS::PathCombine(m_stagingPath, ".minecraft");
+    auto mcPath = FS::PathCombine(m_stagingPath, m_root_path);
 
     auto override_path = FS::PathCombine(m_stagingPath, "overrides");
     if (QFile::exists(override_path)) {
@@ -178,7 +188,7 @@ bool ModrinthCreationTask::createInstance()
         Override::createOverrides("overrides", parent_folder, override_path);
 
         // Apply the overrides
-        if (!QFile::rename(override_path, mcPath)) {
+        if (!FS::move(override_path, mcPath)) {
             setError(tr("Could not rename the overrides folder:\n") + "overrides");
             return false;
         }
@@ -211,6 +221,8 @@ bool ModrinthCreationTask::createInstance()
         components->setComponentVersion("org.quiltmc.quilt-loader", m_quilt_version);
     if (!m_forge_version.isEmpty())
         components->setComponentVersion("net.minecraftforge", m_forge_version);
+    if (!m_neoForge_version.isEmpty())
+        components->setComponentVersion("net.neoforged", m_neoForge_version);
 
     if (m_instIcon != "default") {
         instance.setIconKey(m_instIcon);
@@ -221,58 +233,100 @@ bool ModrinthCreationTask::createInstance()
     // Don't add managed info to packs without an ID (most likely imported from ZIP)
     if (!m_managed_id.isEmpty())
         instance.setManagedPack("modrinth", m_managed_id, m_managed_name, m_managed_version_id, version());
+    else
+        instance.setManagedPack("modrinth", "", name(), "", "");
+
     instance.setName(name());
     instance.saveNow();
 
-    m_files_job.reset(new NetJob(tr("Mod Download Modrinth"), APPLICATION->network()));
+    auto downloadMods = makeShared<NetJob>(tr("Mod Download Modrinth"), APPLICATION->network());
 
-    auto root_modpack_path = FS::PathCombine(m_stagingPath, ".minecraft");
+    auto root_modpack_path = FS::PathCombine(m_stagingPath, m_root_path);
     auto root_modpack_url = QUrl::fromLocalFile(root_modpack_path);
-
+    QHash<QString, Mod*> mods;
     for (auto file : m_files) {
-        auto file_path = FS::PathCombine(root_modpack_path, file.path);
+        auto fileName = file.path;
+        fileName = FS::RemoveInvalidPathChars(fileName);
+        auto file_path = FS::PathCombine(root_modpack_path, fileName);
         if (!root_modpack_url.isParentOf(QUrl::fromLocalFile(file_path))) {
             // This means we somehow got out of the root folder, so abort here to prevent exploits
-            setError(tr("One of the files has a path that leads to an arbitrary location (%1). This is a security risk and isn't allowed.").arg(file.path));
+            setError(tr("One of the files has a path that leads to an arbitrary location (%1). This is a security risk and isn't allowed.")
+                         .arg(fileName));
             return false;
+        }
+        if (fileName.startsWith("mods/")) {
+            auto mod = new Mod(file_path);
+            ModDetails d;
+            d.mod_id = file_path;
+            mod->setDetails(d);
+            mods[file.hash.toHex()] = mod;
         }
 
         qDebug() << "Will try to download" << file.downloads.front() << "to" << file_path;
-        auto dl = Net::Download::makeFile(file.downloads.dequeue(), file_path);
+        auto dl = Net::ApiDownload::makeFile(file.downloads.dequeue(), file_path);
         dl->addValidator(new Net::ChecksumValidator(file.hashAlgorithm, file.hash));
-        m_files_job->addNetAction(dl);
+        downloadMods->addNetAction(dl);
 
         if (!file.downloads.empty()) {
             // FIXME: This really needs to be put into a ConcurrentTask of
             // MultipleOptionsTask's , once those exist :)
             auto param = dl.toWeakRef();
-            connect(dl.get(), &NetAction::failed, [this, &file, file_path, param] {
-                auto ndl = Net::Download::makeFile(file.downloads.dequeue(), file_path);
+            connect(dl.get(), &Task::failed, [&file, file_path, param, downloadMods] {
+                auto ndl = Net::ApiDownload::makeFile(file.downloads.dequeue(), file_path);
                 ndl->addValidator(new Net::ChecksumValidator(file.hashAlgorithm, file.hash));
-                m_files_job->addNetAction(ndl);
-                if (auto shared = param.lock()) shared->succeeded();
+                downloadMods->addNetAction(ndl);
+                if (auto shared = param.lock())
+                    shared->succeeded();
             });
         }
     }
 
     bool ended_well = false;
 
-    connect(m_files_job.get(), &NetJob::succeeded, this, [&]() { ended_well = true; });
-    connect(m_files_job.get(), &NetJob::failed, [&](const QString& reason) {
+    connect(downloadMods.get(), &NetJob::succeeded, this, [&]() { ended_well = true; });
+    connect(downloadMods.get(), &NetJob::failed, [&](const QString& reason) {
         ended_well = false;
         setError(reason);
     });
-    connect(m_files_job.get(), &NetJob::finished, &loop, &QEventLoop::quit);
-    connect(m_files_job.get(), &NetJob::progress, [&](qint64 current, qint64 total) { 
+    connect(downloadMods.get(), &NetJob::finished, &loop, &QEventLoop::quit);
+    connect(downloadMods.get(), &NetJob::progress, [&](qint64 current, qint64 total) {
         setDetails(tr("%1 out of %2 complete").arg(current).arg(total));
-        setProgress(current, total); 
+        setProgress(current, total);
     });
-    connect(m_files_job.get(), &NetJob::stepProgress, this, &ModrinthCreationTask::propagateStepProgress);
+    connect(downloadMods.get(), &NetJob::stepProgress, this, &ModrinthCreationTask::propagateStepProgress);
 
     setStatus(tr("Downloading mods..."));
-    m_files_job->start();
+    downloadMods->start();
+    m_task = downloadMods;
 
     loop.exec();
+
+    if (!ended_well) {
+        for (auto m : mods) {
+            delete m;
+        }
+        return ended_well;
+    }
+
+    QEventLoop ensureMetaLoop;
+    QDir folder = FS::PathCombine(instance.modsRoot(), ".index");
+    auto ensureMetadataTask = makeShared<EnsureMetadataTask>(mods, folder, ModPlatform::ResourceProvider::MODRINTH);
+    connect(ensureMetadataTask.get(), &Task::succeeded, this, [&]() { ended_well = true; });
+    connect(ensureMetadataTask.get(), &Task::finished, &ensureMetaLoop, &QEventLoop::quit);
+    connect(ensureMetadataTask.get(), &Task::progress, [&](qint64 current, qint64 total) {
+        setDetails(tr("%1 out of %2 complete").arg(current).arg(total));
+        setProgress(current, total);
+    });
+    connect(ensureMetadataTask.get(), &Task::stepProgress, this, &ModrinthCreationTask::propagateStepProgress);
+
+    ensureMetadataTask->start();
+    m_task = ensureMetadataTask;
+
+    ensureMetaLoop.exec();
+    for (auto m : mods) {
+        delete m;
+    }
+    mods.clear();
 
     // Update information of the already installed instance, if any.
     if (m_instance && ended_well) {
@@ -282,7 +336,7 @@ bool ModrinthCreationTask::createInstance()
         // Only change the name if it didn't use a custom name, so that the previous custom name
         // is preserved, but if we're using the original one, we update the version string.
         // NOTE: This needs to come before the copyManagedPack call!
-        if (inst->name().contains(inst->getManagedPackVersionName())) {
+        if (inst->name().contains(inst->getManagedPackVersionName()) && inst->name() != instance.name()) {
             if (askForChangingInstanceName(m_parent, inst->name(), instance.name()) == InstanceNameChange::ShouldChange)
                 inst->setName(instance.name());
         }
@@ -293,7 +347,10 @@ bool ModrinthCreationTask::createInstance()
     return ended_well;
 }
 
-bool ModrinthCreationTask::parseManifest(const QString& index_path, std::vector<Modrinth::File>& files, bool set_internal_data, bool show_optional_dialog)
+bool ModrinthCreationTask::parseManifest(const QString& index_path,
+                                         std::vector<Modrinth::File>& files,
+                                         bool set_internal_data,
+                                         bool show_optional_dialog)
 {
     try {
         auto doc = Json::requireDocument(index_path);
@@ -312,10 +369,10 @@ bool ModrinthCreationTask::parseManifest(const QString& index_path, std::vector<
             }
 
             auto jsonFiles = Json::requireIsArrayOf<QJsonObject>(obj, "files", "modrinth.index.json");
-            bool had_optional = false;
+            std::vector<Modrinth::File> optionalFiles;
             for (const auto& modInfo : jsonFiles) {
                 Modrinth::File file;
-                file.path = Json::requireString(modInfo, "path");
+                file.path = Json::requireString(modInfo, "path").replace("\\", "/");
 
                 auto env = Json::ensureObject(modInfo, "env");
                 // 'env' field is optional
@@ -324,39 +381,13 @@ bool ModrinthCreationTask::parseManifest(const QString& index_path, std::vector<
                     if (support == "unsupported") {
                         continue;
                     } else if (support == "optional") {
-                        // TODO: Make a review dialog for choosing which ones the user wants!
-                        if (!had_optional && show_optional_dialog) {
-                            had_optional = true;
-                            auto info = CustomMessageBox::selectable(
-                                m_parent, tr("Optional mod detected!"),
-                                tr("One or more mods from this modpack are optional. They will be downloaded, but disabled by default!"),
-                                QMessageBox::Information);
-                            info->exec();
-                        }
-
-                        if (file.path.endsWith(".jar"))
-                            file.path += ".disabled";
+                        file.required = false;
                     }
                 }
 
                 QJsonObject hashes = Json::requireObject(modInfo, "hashes");
-                QString hash;
-                QCryptographicHash::Algorithm hashAlgorithm;
-                hash = Json::ensureString(hashes, "sha1");
-                hashAlgorithm = QCryptographicHash::Sha1;
-                if (hash.isEmpty()) {
-                    hash = Json::ensureString(hashes, "sha512");
-                    hashAlgorithm = QCryptographicHash::Sha512;
-                    if (hash.isEmpty()) {
-                        hash = Json::ensureString(hashes, "sha256");
-                        hashAlgorithm = QCryptographicHash::Sha256;
-                        if (hash.isEmpty()) {
-                            throw JSONValidationError("No hash found for: " + file.path);
-                        }
-                    }
-                }
-                file.hash = QByteArray::fromHex(hash.toLatin1());
-                file.hashAlgorithm = hashAlgorithm;
+                file.hash = QByteArray::fromHex(Json::requireString(hashes, "sha512").toLatin1());
+                file.hashAlgorithm = QCryptographicHash::Sha512;
 
                 // Do not use requireUrl, which uses StrictMode, instead use QUrl's default TolerantMode
                 // (as Modrinth seems to incorrectly handle spaces)
@@ -378,9 +409,29 @@ bool ModrinthCreationTask::parseManifest(const QString& index_path, std::vector<
                     }
                 }
 
-                files.push_back(file);
+                (file.required ? files : optionalFiles).push_back(file);
             }
 
+            if (!optionalFiles.empty()) {
+                QStringList oFiles;
+                for (auto file : optionalFiles)
+                    oFiles.push_back(file.path);
+                OptionalModDialog optionalModDialog(m_parent, oFiles);
+                if (optionalModDialog.exec() == QDialog::Rejected) {
+                    emitAborted();
+                    return false;
+                }
+
+                auto selectedMods = optionalModDialog.getResult();
+                for (auto file : optionalFiles) {
+                    if (selectedMods.contains(file.path)) {
+                        file.required = true;
+                    } else {
+                        file.path += ".disabled";
+                    }
+                    files.push_back(file);
+                }
+            }
             if (set_internal_data) {
                 auto dependencies = Json::requireObject(obj, "dependencies", "modrinth.index.json");
                 for (auto it = dependencies.begin(), end = dependencies.end(); it != end; ++it) {
@@ -393,6 +444,8 @@ bool ModrinthCreationTask::parseManifest(const QString& index_path, std::vector<
                         m_quilt_version = Json::requireString(*it, "Quilt Loader version");
                     } else if (name == "forge") {
                         m_forge_version = Json::requireString(*it, "Forge version");
+                    } else if (name == "neoforge") {
+                        m_neoForge_version = Json::requireString(*it, "NeoForge version");
                     } else {
                         throw JSONValidationError("Unknown dependency type: " + name);
                     }

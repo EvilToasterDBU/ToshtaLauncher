@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 /*
- *  PolyMC - Minecraft Launcher
+ *  Prism Launcher - Minecraft Launcher
  *  Copyright (c) 2022 flowln <flowlnlnln@gmail.com>
  *
  *  This program is free software: you can redistribute it and/or modify
@@ -38,10 +38,13 @@
 
 #include "Application.h"
 #include "ui/dialogs/NewInstanceDialog.h"
-#include "ui/pages/BasePage.h"
 
 #include "modplatform/modrinth/ModrinthPackManifest.h"
+#include "ui/pages/modplatform/ModpackProviderBasePage.h"
+#include "ui/widgets/ModFilterWidget.h"
+#include "ui/widgets/ProgressWidget.h"
 
+#include <QTimer>
 #include <QWidget>
 
 namespace Ui {
@@ -52,7 +55,7 @@ namespace Modrinth {
 class ModpackListModel;
 }
 
-class ModrinthPage : public QWidget, public BasePage {
+class ModrinthPage : public QWidget, public ModpackProviderBasePage {
     Q_OBJECT
 
    public:
@@ -76,10 +79,16 @@ class ModrinthPage : public QWidget, public BasePage {
     void openedImpl() override;
     bool eventFilter(QObject* watched, QEvent* event) override;
 
+    /** Programatically set the term in the search bar. */
+    virtual void setSearchTerm(QString) override;
+    /** Get the current term in the search bar. */
+    [[nodiscard]] virtual QString getSerachTerm() const override;
+
    private slots:
     void onSelectionChanged(QModelIndex first, QModelIndex second);
-    void onVersionSelectionChanged(QString data);
+    void onVersionSelectionChanged(int index);
     void triggerSearch();
+    void createFilterWidget();
 
    private:
     Ui::ModrinthPage* ui;
@@ -88,4 +97,12 @@ class ModrinthPage : public QWidget, public BasePage {
 
     Modrinth::Modpack current;
     QString selectedVersion;
+
+    ProgressWidget m_fetch_progress;
+
+    // Used to do instant searching with a delay to cache quick changes
+    QTimer m_search_timer;
+
+    unique_qobject_ptr<ModFilterWidget> m_filterWidget;
+    Task::Ptr m_categoriesTask;
 };

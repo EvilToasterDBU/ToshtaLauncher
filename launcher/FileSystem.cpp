@@ -123,26 +123,35 @@ namespace fs = ghc::filesystem;
 
 #if defined(__MINGW32__)
 
-typedef struct _DUPLICATE_EXTENTS_DATA {
+struct _DUPLICATE_EXTENTS_DATA {
     HANDLE FileHandle;
     LARGE_INTEGER SourceFileOffset;
     LARGE_INTEGER TargetFileOffset;
     LARGE_INTEGER ByteCount;
-} DUPLICATE_EXTENTS_DATA, *PDUPLICATE_EXTENTS_DATA;
+};
 
-typedef struct _FSCTL_GET_INTEGRITY_INFORMATION_BUFFER {
+using DUPLICATE_EXTENTS_DATA = _DUPLICATE_EXTENTS_DATA;
+using PDUPLICATE_EXTENTS_DATA = _DUPLICATE_EXTENTS_DATA*;
+
+struct _FSCTL_GET_INTEGRITY_INFORMATION_BUFFER {
     WORD ChecksumAlgorithm;  // Checksum algorithm. e.g. CHECKSUM_TYPE_UNCHANGED, CHECKSUM_TYPE_NONE, CHECKSUM_TYPE_CRC32
     WORD Reserved;           // Must be 0
     DWORD Flags;             // FSCTL_INTEGRITY_FLAG_xxx
     DWORD ChecksumChunkSizeInBytes;
     DWORD ClusterSizeInBytes;
-} FSCTL_GET_INTEGRITY_INFORMATION_BUFFER, *PFSCTL_GET_INTEGRITY_INFORMATION_BUFFER;
+};
 
-typedef struct _FSCTL_SET_INTEGRITY_INFORMATION_BUFFER {
+using FSCTL_GET_INTEGRITY_INFORMATION_BUFFER = _FSCTL_GET_INTEGRITY_INFORMATION_BUFFER;
+using PFSCTL_GET_INTEGRITY_INFORMATION_BUFFER = _FSCTL_GET_INTEGRITY_INFORMATION_BUFFER*;
+
+struct _FSCTL_SET_INTEGRITY_INFORMATION_BUFFER {
     WORD ChecksumAlgorithm;  // Checksum algorithm. e.g. CHECKSUM_TYPE_UNCHANGED, CHECKSUM_TYPE_NONE, CHECKSUM_TYPE_CRC32
     WORD Reserved;           // Must be 0
     DWORD Flags;             // FSCTL_INTEGRITY_FLAG_xxx
-} FSCTL_SET_INTEGRITY_INFORMATION_BUFFER, *PFSCTL_SET_INTEGRITY_INFORMATION_BUFFER;
+};
+
+using FSCTL_SET_INTEGRITY_INFORMATION_BUFFER = _FSCTL_SET_INTEGRITY_INFORMATION_BUFFER;
+using PFSCTL_SET_INTEGRITY_INFORMATION_BUFFER = _FSCTL_SET_INTEGRITY_INFORMATION_BUFFER*;
 
 #endif
 
@@ -194,6 +203,40 @@ void write(const QString& filename, const QByteArray& data)
     }
 }
 
+void appendSafe(const QString& filename, const QByteArray& data)
+{
+    ensureExists(QFileInfo(filename).dir());
+    QByteArray buffer;
+    try {
+        buffer = read(filename);
+    } catch (FileSystemException&) {
+        buffer = QByteArray();
+    }
+    buffer.append(data);
+    QSaveFile file(filename);
+    if (!file.open(QSaveFile::WriteOnly)) {
+        throw FileSystemException("Couldn't open " + filename + " for writing: " + file.errorString());
+    }
+    if (buffer.size() != file.write(buffer)) {
+        throw FileSystemException("Error writing data to " + filename + ": " + file.errorString());
+    }
+    if (!file.commit()) {
+        throw FileSystemException("Error while committing data to " + filename + ": " + file.errorString());
+    }
+}
+
+void append(const QString& filename, const QByteArray& data)
+{
+    ensureExists(QFileInfo(filename).dir());
+    QFile file(filename);
+    if (!file.open(QFile::Append)) {
+        throw FileSystemException("Couldn't open " + filename + " for writing: " + file.errorString());
+    }
+    if (data.size() != file.write(data)) {
+        throw FileSystemException("Error writing data to " + filename + ": " + file.errorString());
+    }
+}
+
 QByteArray read(const QString& filename)
 {
     QFile file(filename);
@@ -229,13 +272,42 @@ bool ensureFilePathExists(QString filenamepath)
     return success;
 }
 
-bool ensureFolderPathExists(QString foldernamepath)
+bool ensureFolderPathExists(const QFileInfo folderPath)
 {
-    QFileInfo a(foldernamepath);
     QDir dir;
-    QString ensuredPath = a.filePath();
+    QString ensuredPath = folderPath.filePath();
+    if (folderPath.exists())
+        return true;
+
     bool success = dir.mkpath(ensuredPath);
     return success;
+}
+
+bool ensureFolderPathExists(const QString folderPathName)
+{
+    return ensureFolderPathExists(QFileInfo(folderPathName));
+}
+
+bool copyFileAttributes(QString src, QString dst)
+{
+#ifdef Q_OS_WIN32
+    auto attrs = GetFileAttributesW(src.toStdWString().c_str());
+    if (attrs == INVALID_FILE_ATTRIBUTES)
+        return false;
+    return SetFileAttributesW(dst.toStdWString().c_str(), attrs);
+#endif
+    return true;
+}
+
+// needs folders to exists
+void copyFolderAttributes(QString src, QString dst, QString relative)
+{
+    auto path = PathCombine(src, relative);
+    QDir dsrc(src);
+    while ((path = QFileInfo(path).path()).length() >= src.length()) {
+        auto dst_path = PathCombine(dst, dsrc.relativeFilePath(path));
+        copyFileAttributes(path, dst_path);
+    }
 }
 
 /**
@@ -265,6 +337,9 @@ bool copy::operator()(const QString& offset, bool dryRun)
     if (!m_followSymlinks)
         opt |= copy_opts::copy_symlinks;
 
+    if (m_overwrite)
+        opt |= copy_opts::overwrite_existing;
+
     // Function that'll do the actual copying
     auto copy_file = [&](QString src_path, QString relative_dst_path) {
         if (m_matcher && (m_matcher->matches(relative_dst_path) != m_whitelist))
@@ -273,6 +348,9 @@ bool copy::operator()(const QString& offset, bool dryRun)
         auto dst_path = PathCombine(dst, relative_dst_path);
         if (!dryRun) {
             ensureFilePathExists(dst_path);
+#ifdef Q_OS_WIN32
+            copyFolderAttributes(src, dst, relative_dst_path);
+#endif
             fs::copy(StringUtils::toStdString(src_path), StringUtils::toStdString(dst_path), opt, err);
         }
         if (err) {
@@ -572,6 +650,19 @@ void ExternalLinkFileProcess::runLinkFile()
     qDebug() << "Process exited";
 }
 
+bool moveByCopy(const QString& source, const QString& dest)
+{
+    if (!copy(source, dest)()) {  // copy
+        qDebug() << "Copy of" << source << "to" << dest << "failed!";
+        return false;
+    }
+    if (!deletePath(source)) {  // remove original
+        qDebug() << "Deletion of" << source << "failed!";
+        return false;
+    };
+    return true;
+}
+
 bool move(const QString& source, const QString& dest)
 {
     std::error_code err;
@@ -579,13 +670,14 @@ bool move(const QString& source, const QString& dest)
     ensureFilePathExists(dest);
     fs::rename(StringUtils::toStdString(source), StringUtils::toStdString(dest), err);
 
-    if (err) {
-        qWarning() << "Failed to move file:" << QString::fromStdString(err.message());
-        qDebug() << "Source file:" << source;
-        qDebug() << "Destination file:" << dest;
+    if (err.value() != 0) {
+        if (moveByCopy(source, dest))
+            return true;
+        qDebug() << "Move of" << source << "to" << dest << "failed!";
+        qWarning() << "Failed to move file:" << QString::fromStdString(err.message()) << QString::number(err.value());
+        return false;
     }
-
-    return err.value() == 0;
+    return true;
 }
 
 bool deletePath(QString path)
@@ -726,16 +818,68 @@ QString NormalizePath(QString path)
     }
 }
 
-QString badFilenameChars = "\"\\/?<>:;*|!+\r\n";
+static const QString BAD_WIN_CHARS = "<>:\"|?*\r\n";
+static const QString BAD_NTFS_CHARS = "<>:\"|?*";
+static const QString BAD_HFS_CHARS = ":";
+
+static const QString BAD_FILENAME_CHARS = BAD_WIN_CHARS + "\\/";
 
 QString RemoveInvalidFilenameChars(QString string, QChar replaceWith)
 {
-    for (int i = 0; i < string.length(); i++) {
-        if (badFilenameChars.contains(string[i])) {
+    for (int i = 0; i < string.length(); i++)
+        if (string.at(i) < ' ' || BAD_FILENAME_CHARS.contains(string.at(i)))
             string[i] = replaceWith;
+    return string;
+}
+
+QString RemoveInvalidPathChars(QString path, QChar replaceWith)
+{
+    QString invalidChars;
+#ifdef Q_OS_WIN
+    invalidChars = BAD_WIN_CHARS;
+#endif
+
+    // the null character is ignored in this check as it was not a problem until now
+    switch (statFS(path).fsType) {
+        case FilesystemType::FAT:  // similar to NTFS
+        /* fallthrough */
+        case FilesystemType::NTFS:
+        /* fallthrough */
+        case FilesystemType::REFS:  // similar to NTFS(should be available only on windows)
+            invalidChars += BAD_NTFS_CHARS;
+            break;
+        // case FilesystemType::EXT:
+        // case FilesystemType::EXT_2_OLD:
+        // case FilesystemType::EXT_2_3_4:
+        // case FilesystemType::XFS:
+        // case FilesystemType::BTRFS:
+        // case FilesystemType::NFS:
+        // case FilesystemType::ZFS:
+        case FilesystemType::APFS:
+        /* fallthrough */
+        case FilesystemType::HFS:
+        /* fallthrough */
+        case FilesystemType::HFSPLUS:
+        /* fallthrough */
+        case FilesystemType::HFSX:
+            invalidChars += BAD_HFS_CHARS;
+            break;
+        // case FilesystemType::FUSEBLK:
+        // case FilesystemType::F2FS:
+        // case FilesystemType::UNKNOWN:
+        default:
+            break;
+    }
+
+    if (invalidChars.size() != 0) {
+        for (int i = 0; i < path.length(); i++) {
+            if (path.at(i) < ' ' || invalidChars.contains(path.at(i))) {
+                path[i] = replaceWith;
+            }
         }
     }
-    return string;
+
+    return path;
 }
 
 QString DirNameFromString(QString string, QString inDir)
@@ -777,9 +921,14 @@ bool createShortcut(QString destination, QString target, QStringList args, QStri
     if (destination.isEmpty()) {
         destination = PathCombine(getDesktopDir(), RemoveInvalidFilenameChars(name));
     }
+    if (!ensureFilePathExists(destination)) {
+        qWarning() << "Destination path can't be created!";
+        return false;
+    }
 #if defined(Q_OS_MACOS)
     // Create the Application
-    QDir applicationDirectory = QStandardPaths::writableLocation(QStandardPaths::ApplicationsLocation) + "/" + BuildConfig.LAUNCHER_NAME + " Instances/";
+    QDir applicationDirectory =
+        QStandardPaths::writableLocation(QStandardPaths::ApplicationsLocation) + "/" + BuildConfig.LAUNCHER_NAME + " Instances/";
 
     if (!applicationDirectory.mkpath(".")) {
         qWarning() << "Couldn't create application directory";
@@ -843,7 +992,9 @@ bool createShortcut(QString destination, QString target, QStringList args, QStri
                   "    <key>CFBundleIconFile</key>\n"
                   "    <string>Icon.icns</string>\n"
                   "    <key>CFBundleName</key>\n"
-                  "    <string>" << name << "</string>\n"  // Name of the application
+                  "    <string>"
+               << name
+               << "</string>\n"  // Name of the application
                   "    <key>CFBundlePackageType</key>\n"
                   "    <string>APPL</string>\n"
                   "    <key>CFBundleShortVersionString</key>\n"
@@ -868,6 +1019,8 @@ bool createShortcut(QString destination, QString target, QStringList args, QStri
     stream << "[Desktop Entry]"
            << "\n";
     stream << "Type=Application"
+           << "\n";
+    stream << "Categories=Game;ActionGame;AdventureGame;Simulation"
            << "\n";
     stream << "Exec=\"" << target.toLocal8Bit() << "\"" << argstring.toLocal8Bit() << "\n";
     stream << "Name=" << name.toLocal8Bit() << "\n";
@@ -1505,4 +1658,70 @@ uintmax_t hardLinkCount(const QString& path)
     return count;
 }
 
+#ifdef Q_OS_WIN
+// returns 8.3 file format from long path
+QString shortPathName(const QString& file)
+{
+    auto input = file.toStdWString();
+    std::wstring output;
+    long length = GetShortPathNameW(input.c_str(), NULL, 0);
+    if (length == 0)
+        return {};
+    // NOTE: this resizing might seem weird...
+    // when GetShortPathNameW fails, it returns length including null character
+    // when it succeeds, it returns length excluding null character
+    // See: https://msdn.microsoft.com/en-us/library/windows/desktop/aa364989(v=vs.85).aspx
+    output.resize(length);
+    if (GetShortPathNameW(input.c_str(), (LPWSTR)output.c_str(), length) == 0)
+        return {};
+    output.resize(length - 1);
+    QString ret = QString::fromStdWString(output);
+    return ret;
+}
+
+// if the string survives roundtrip through local 8bit encoding...
+bool fitsInLocal8bit(const QString& string)
+{
+    return string == QString::fromLocal8Bit(string.toLocal8Bit());
+}
+
+QString getPathNameInLocal8bit(const QString& file)
+{
+    if (!fitsInLocal8bit(file)) {
+        auto path = shortPathName(file);
+        if (!path.isEmpty()) {
+            return path;
+        }
+        // in case shortPathName fails just return the path as is
+    }
+    return file;
+}
+#endif
+
+QString getUniqueResourceName(const QString& filePath)
+{
+    auto newFileName = filePath;
+    if (!newFileName.endsWith(".disabled")) {
+        return newFileName;  // prioritize enabled mods
+    }
+    newFileName.chop(9);
+    if (!QFile::exists(newFileName)) {
+        return filePath;
+    }
+    QFileInfo fileInfo(filePath);
+    auto baseName = fileInfo.completeBaseName();
+    auto path = fileInfo.absolutePath();
+
+    int counter = 1;
+    do {
+        if (counter == 1) {
+            newFileName = FS::PathCombine(path, baseName + ".duplicate");
+        } else {
+            newFileName = FS::PathCombine(path, baseName + ".duplicate" + QString::number(counter));
+        }
+        counter++;
+    } while (QFile::exists(newFileName));
+
+    return newFileName;
+}
 }  // namespace FS

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 /*
- *  PolyMC - Minecraft Launcher
+ *  Prism Launcher - Minecraft Launcher
  *  Copyright (C) 2022 Sefa Eyeoglu <contact@scrumplex.net>
  *
  *  This program is free software: you can redistribute it and/or modify
@@ -40,66 +40,46 @@
 #include <QString>
 #include <QUrl>
 #include <QVector>
+#include "modplatform/ModIndex.h"
 
-namespace Flame
-{
-struct File
-{
-    // NOTE: throws JSONValidationError
-    bool parseFromObject(const QJsonObject& object, bool throw_on_blocked = true);
-
+namespace Flame {
+struct File {
     int projectId = 0;
     int fileId = 0;
-    // NOTE: the opposite to 'optional'. This is at the time of writing unused.
+    // NOTE: the opposite to 'optional'
     bool required = true;
-    QString hash;
-    // NOTE: only set on blocked files ! Empty otherwise.
-    QString websiteUrl;
+
+    ModPlatform::IndexedPack pack;
+    ModPlatform::IndexedVersion version;
 
     // our
-    bool resolved = false;
-    QString fileName;
-    QUrl url;
     QString targetFolder = QStringLiteral("mods");
-    enum class Type
-    {
-        Unknown,
-        Folder,
-        Ctoc,
-        SingleFile,
-        Cmod2,
-        Modpack,
-        Mod
-    } type = Type::Mod;
 };
 
-struct Modloader
-{
+struct Modloader {
     QString id;
     bool primary = false;
 };
 
-struct Minecraft
-{
+struct Minecraft {
     QString version;
     QString libraries;
     QVector<Flame::Modloader> modLoaders;
 };
 
-struct Manifest
-{
+struct Manifest {
     QString manifestType;
     int manifestVersion = 0;
     Flame::Minecraft minecraft;
     QString name;
     QString version;
     QString author;
-    //File id -> File
-    QMap<int,Flame::File> files;
+    // File id -> File
+    QMap<int, Flame::File> files;
     QString overrides;
 
     bool is_loaded = false;
 };
 
-void loadManifest(Flame::Manifest & m, const QString &filepath);
-}
+void loadManifest(Flame::Manifest& m, const QString& filepath);
+}  // namespace Flame

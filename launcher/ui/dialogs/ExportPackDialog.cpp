@@ -37,15 +37,28 @@
 ExportPackDialog::ExportPackDialog(InstancePtr instance, QWidget* parent, ModPlatform::ResourceProvider provider)
     : QDialog(parent), instance(instance), ui(new Ui::ExportPackDialog), m_provider(provider)
 {
+    Q_ASSERT(m_provider == ModPlatform::ResourceProvider::MODRINTH || m_provider == ModPlatform::ResourceProvider::FLAME);
+
     ui->setupUi(this);
-    ui->name->setText(instance->name());
+    ui->name->setPlaceholderText(instance->name());
+    ui->name->setText(instance->settings()->get("ExportName").toString());
+    ui->version->setText(instance->settings()->get("ExportVersion").toString());
+    ui->optionalFiles->setChecked(instance->settings()->get("ExportOptionalFiles").toBool());
+
     if (m_provider == ModPlatform::ResourceProvider::MODRINTH) {
-        ui->summary->setText(instance->notes().split(QRegularExpression("\\r?\\n"))[0]);
-        setWindowTitle("Export Modrinth Pack");
+        setWindowTitle(tr("Export Modrinth Pack"));
+
+        ui->authorLabel->hide();
+        ui->author->hide();
+
+        ui->summary->setPlainText(instance->settings()->get("ExportSummary").toString());
     } else {
-        setWindowTitle("Export CurseForge Pack");
-        ui->version->setText("");
-        ui->summaryLabel->setText("Author");
+        setWindowTitle(tr("Export CurseForge Pack"));
+
+        ui->summaryLabel->hide();
+        ui->summary->hide();
+
+        ui->author->setText(instance->settings()->get("ExportAuthor").toString());
     }
 
     // ensure a valid pack is generated
@@ -75,20 +88,19 @@ ExportPackDialog::ExportPackDialog(InstancePtr instance, QWidget* parent, ModPla
 
     MinecraftInstance* mcInstance = dynamic_cast<MinecraftInstance*>(instance.get());
     if (mcInstance) {
-        mcInstance->loaderModList()->update();
         const QDir index = mcInstance->loaderModList()->indexDir();
         if (index.exists())
-            proxy->blockedPaths().insert(root.relativeFilePath(index.absolutePath()));
+            proxy->ignoreFilesWithPath().insert(root.relativeFilePath(index.absolutePath()));
     }
 
-    ui->treeView->setModel(proxy);
-    ui->treeView->setRootIndex(proxy->mapFromSource(model->index(instance->gameRoot())));
-    ui->treeView->sortByColumn(0, Qt::AscendingOrder);
+    ui->files->setModel(proxy);
+    ui->files->setRootIndex(proxy->mapFromSource(model->index(instance->gameRoot())));
+    ui->files->sortByColumn(0, Qt::AscendingOrder);
 
     model->setFilter(filter);
     model->setRootPath(instance->gameRoot());
 
-    QHeaderView* headerView = ui->treeView->header();
+    QHeaderView* headerView = ui->files->header();
     headerView->setSectionResizeMode(QHeaderView::ResizeToContents);
     headerView->setSectionResizeMode(0, QHeaderView::Stretch);
 }
@@ -100,26 +112,45 @@ ExportPackDialog::~ExportPackDialog()
 
 void ExportPackDialog::done(int result)
 {
-    if (result == Accepted) {
-        const QString filename = FS::RemoveInvalidFilenameChars(ui->name->text());
-        QString output;
-        if (m_provider == ModPlatform::ResourceProvider::MODRINTH)
-            output = QFileDialog::getSaveFileName(this, tr("Export %1").arg(ui->name->text()),
-                                                  FS::PathCombine(QDir::homePath(), filename + ".mrpack"), "Modrinth pack (*.mrpack *.zip)",
-                                                  nullptr);
-        else
-            output = QFileDialog::getSaveFileName(this, tr("Export %1").arg(ui->name->text()),
-                                                  FS::PathCombine(QDir::homePath(), filename + ".zip"), "CurseForge pack (*.zip)", nullptr);
+    auto settings = instance->settings();
+    settings->set("ExportName", ui->name->text());
+    settings->set("ExportVersion", ui->version->text());
+    settings->set("ExportOptionalFiles", ui->optionalFiles->isChecked());
 
-        if (output.isEmpty())
-            return;
+    if (m_provider == ModPlatform::ResourceProvider::MODRINTH)
+        settings->set("ExportSummary", ui->summary->toPlainText());
+    else
+        settings->set("ExportAuthor", ui->author->text());
+
+    if (result == Accepted) {
+        const QString name = ui->name->text().isEmpty() ? instance->name() : ui->name->text();
+        const QString filename = FS::RemoveInvalidFilenameChars(name);
+
+        QString output;
+        if (m_provider == ModPlatform::ResourceProvider::MODRINTH) {
+            output = QFileDialog::getSaveFileName(this, tr("Export %1").arg(name), FS::PathCombine(QDir::homePath(), filename + ".mrpack"),
+                                                  tr("Modrinth pack") + " (*.mrpack *.zip)", nullptr);
+            if (output.isEmpty())
+                return;
+            if (!(output.endsWith(".zip") || output.endsWith(".mrpack")))
+                output.append(".mrpack");
+        } else {
+            output = QFileDialog::getSaveFileName(this, tr("Export %1").arg(name), FS::PathCombine(QDir::homePath(), filename + ".zip"),
+                                                  tr("CurseForge pack") + " (*.zip)", nullptr);
+            if (output.isEmpty())
+                return;
+            if (!output.endsWith(".zip"))
+                output.append(".zip");
+        }
+
         Task* task;
-        if (m_provider == ModPlatform::ResourceProvider::MODRINTH)
-            task = new ModrinthPackExportTask(ui->name->text(), ui->version->text(), ui->summary->text(), instance, output,
-                                              std::bind(&FileIgnoreProxy::filterFile, proxy, std::placeholders::_1));
-        else
-            task = new FlamePackExportTask(ui->name->text(), ui->version->text(), ui->summary->text(), instance, output,
+        if (m_provider == ModPlatform::ResourceProvider::MODRINTH) {
+            task = new ModrinthPackExportTask(name, ui->version->text(), ui->summary->toPlainText(), ui->optionalFiles->isChecked(),
+                                              instance, output, std::bind(&FileIgnoreProxy::filterFile, proxy, std::placeholders::_1));
+        } else {
+            task = new FlamePackExportTask(name, ui->version->text(), ui->author->text(), ui->optionalFiles->isChecked(), instance, output,
                                            std::bind(&FileIgnoreProxy::filterFile, proxy, std::placeholders::_1));
+        }
 
         connect(task, &Task::failed,
                 [this](const QString reason) { CustomMessageBox::selectable(this, tr("Error"), reason, QMessageBox::Critical)->show(); });
@@ -140,7 +171,6 @@ void ExportPackDialog::done(int result)
 
 void ExportPackDialog::validate()
 {
-    const bool invalid =
-        ui->name->text().isEmpty() || ((m_provider == ModPlatform::ResourceProvider::MODRINTH) && ui->version->text().isEmpty());
-    ui->buttonBox->button(QDialogButtonBox::Ok)->setDisabled(invalid);
+    ui->buttonBox->button(QDialogButtonBox::Ok)
+        ->setDisabled(m_provider == ModPlatform::ResourceProvider::MODRINTH && ui->version->text().isEmpty());
 }

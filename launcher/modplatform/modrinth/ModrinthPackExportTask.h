@@ -27,10 +27,12 @@
 #include "tasks/Task.h"
 
 class ModrinthPackExportTask : public Task {
+    Q_OBJECT
    public:
     ModrinthPackExportTask(const QString& name,
                            const QString& version,
                            const QString& summary,
+                           bool optionalFiles,
                            InstancePtr instance,
                            const QString& output,
                            MMCZip::FilterFunction filter);
@@ -43,6 +45,7 @@ class ModrinthPackExportTask : public Task {
     struct ResolvedFile {
         QString sha1, sha512, url;
         qint64 size;
+        Metadata::ModSide side;
     };
 
     static const QStringList PREFIXES;
@@ -50,28 +53,24 @@ class ModrinthPackExportTask : public Task {
 
     // inputs
     const QString name, version, summary;
+    const bool optionalFiles;
     const InstancePtr instance;
     MinecraftInstance* mcInstance;
     const QDir gameRoot;
     const QString output;
     const MMCZip::FilterFunction filter;
 
-    typedef std::optional<QString> BuildZipResult;
-
     ModrinthAPI api;
     QFileInfoList files;
     QMap<QString, QString> pendingHashes;
     QMap<QString, ResolvedFile> resolvedFiles;
     Task::Ptr task;
-    QFuture<BuildZipResult> buildZipFuture;
-    QFutureWatcher<BuildZipResult> buildZipWatcher;
 
     void collectFiles();
     void collectHashes();
     void makeApiRequest();
-    void parseApiResponse(const std::shared_ptr<QByteArray> response);
+    void parseApiResponse(std::shared_ptr<QByteArray> response);
     void buildZip();
-    void finish();
 
     QByteArray generateIndex();
 };

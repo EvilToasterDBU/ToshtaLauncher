@@ -42,12 +42,10 @@ namespace Net {
 
 /*
  * Sink object for downloads that uses an external QByteArray it doesn't own as a target.
- * FIXME: It is possible that the QByteArray is freed while we're doing some operation on it,
- * causing a segmentation fault.
  */
 class ByteArraySink : public Sink {
    public:
-    ByteArraySink(std::shared_ptr<QByteArray> output) : m_output(output){};
+    ByteArraySink(std::shared_ptr<QByteArray> output) : m_output(output) {};
 
     virtual ~ByteArraySink() = default;
 
@@ -76,10 +74,6 @@ class ByteArraySink : public Sink {
 
     auto abort() -> Task::State override
     {
-        if (m_output)
-            m_output->clear();
-        else
-            qWarning() << "ByteArraySink did not clear the buffer because it's not addressable";
         failAllValidators();
         return Task::State::Failed;
     }

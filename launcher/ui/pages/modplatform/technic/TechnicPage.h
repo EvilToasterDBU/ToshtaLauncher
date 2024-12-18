@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 /*
- *  PolyMC - Minecraft Launcher
+ *  Prism Launcher - Minecraft Launcher
  *  Copyright (c) 2021-2022 Jamie Mansfield <jmansfield@cadixdev.org>
  *
  *  This program is free software: you can redistribute it and/or modify
@@ -35,48 +35,35 @@
 
 #pragma once
 
+#include <QTimer>
 #include <QWidget>
 
-#include "ui/pages/BasePage.h"
 #include <Application.h>
-#include "net/NetJob.h"
-#include "tasks/Task.h"
 #include "TechnicData.h"
+#include "net/NetJob.h"
+#include "ui/pages/modplatform/ModpackProviderBasePage.h"
+#include "ui/widgets/ProgressWidget.h"
 
-namespace Ui
-{
+namespace Ui {
 class TechnicPage;
 }
 
 class NewInstanceDialog;
 
 namespace Technic {
-    class ListModel;
+class ListModel;
 }
 
-class TechnicPage : public QWidget, public BasePage
-{
+class TechnicPage : public QWidget, public ModpackProviderBasePage {
     Q_OBJECT
 
-public:
-    explicit TechnicPage(NewInstanceDialog* dialog, QWidget *parent = 0);
+   public:
+    explicit TechnicPage(NewInstanceDialog* dialog, QWidget* parent = 0);
     virtual ~TechnicPage();
-    virtual QString displayName() const override
-    {
-        return "Technic";
-    }
-    virtual QIcon icon() const override
-    {
-        return APPLICATION->getThemedIcon("technic");
-    }
-    virtual QString id() const override
-    {
-        return "technic";
-    }
-    virtual QString helpPage() const override
-    {
-        return "Technic-platform";
-    }
+    virtual QString displayName() const override { return "Technic"; }
+    virtual QIcon icon() const override { return APPLICATION->getThemedIcon("technic"); }
+    virtual QString id() const override { return "technic"; }
+    virtual QString helpPage() const override { return "Technic-platform"; }
     virtual bool shouldDisplay() const override;
     void retranslate() override;
 
@@ -84,19 +71,24 @@ public:
 
     bool eventFilter(QObject* watched, QEvent* event) override;
 
-private:
+    /** Programatically set the term in the search bar. */
+    virtual void setSearchTerm(QString) override;
+    /** Get the current term in the search bar. */
+    [[nodiscard]] virtual QString getSerachTerm() const override;
+
+   private:
     void suggestCurrent();
     void metadataLoaded();
     void selectVersion();
 
-private slots:
+   private slots:
     void triggerSearch();
     void onSelectionChanged(QModelIndex first, QModelIndex second);
     void onSolderLoaded();
     void onVersionSelectionChanged(QString data);
 
-private:
-    Ui::TechnicPage *ui = nullptr;
+   private:
+    Ui::TechnicPage* ui = nullptr;
     NewInstanceDialog* dialog = nullptr;
     Technic::ListModel* model = nullptr;
 
@@ -105,4 +97,9 @@ private:
 
     NetJob::Ptr jobPtr;
     std::shared_ptr<QByteArray> response = std::make_shared<QByteArray>();
+
+    ProgressWidget m_fetch_progress;
+
+    // Used to do instant searching with a delay to cache quick changes
+    QTimer m_search_timer;
 };

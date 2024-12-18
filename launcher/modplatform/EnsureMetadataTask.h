@@ -1,14 +1,14 @@
 #pragma once
 
 #include "ModIndex.h"
-#include "net/NetJob.h"
 
 #include "modplatform/helpers/HashUtils.h"
 
 #include "tasks/ConcurrentTask.h"
 
+#include <QDir>
+
 class Mod;
-class QDir;
 
 class EnsureMetadataTask : public Task {
     Q_OBJECT
@@ -16,6 +16,7 @@ class EnsureMetadataTask : public Task {
    public:
     EnsureMetadataTask(Mod*, QDir, ModPlatform::ResourceProvider = ModPlatform::ResourceProvider::MODRINTH);
     EnsureMetadataTask(QList<Mod*>&, QDir, ModPlatform::ResourceProvider = ModPlatform::ResourceProvider::MODRINTH);
+    EnsureMetadataTask(QHash<QString, Mod*>&, QDir, ModPlatform::ResourceProvider = ModPlatform::ResourceProvider::MODRINTH);
 
     ~EnsureMetadataTask() = default;
 
@@ -35,10 +36,7 @@ class EnsureMetadataTask : public Task {
     auto flameProjectsTask() -> Task::Ptr;
 
     // Helpers
-    enum class RemoveFromList {
-        Yes,
-        No
-    };
+    enum class RemoveFromList { Yes, No };
     void emitReady(Mod*, QString key = {}, RemoveFromList = RemoveFromList::Yes);
     void emitFail(Mod*, QString key = {}, RemoveFromList = RemoveFromList::Yes);
 

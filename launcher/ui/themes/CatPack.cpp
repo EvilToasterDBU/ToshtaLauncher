@@ -36,14 +36,17 @@
 #include "ui/themes/CatPack.h"
 #include <QDate>
 #include <QDir>
+#include <QDirIterator>
 #include <QFileInfo>
+#include <QImageReader>
+#include <QRandomGenerator>
 #include "FileSystem.h"
 #include "Json.h"
 
 QString BasicCatPack::path()
 {
     const auto now = QDate::currentDate();
-    const auto birthday = QDate(now.year(), 11, 30);
+    const auto birthday = QDate(now.year(), 11, 1);
     const auto xmas = QDate(now.year(), 12, 25);
     const auto halloween = QDate(now.year(), 10, 31);
 
@@ -79,7 +82,7 @@ JsonCatPack::JsonCatPack(QFileInfo& manifestInfo) : BasicCatPack(manifestInfo.di
     auto doc = Json::requireDocument(manifestInfo.absoluteFilePath(), "CatPack JSON file");
     const auto root = doc.object();
     m_name = Json::requireString(root, "name", "Catpack name");
-    m_defaultPath = FS::PathCombine(path, Json::requireString(root, "default", "Default Cat"));
+    m_default_path = FS::PathCombine(path, Json::requireString(root, "default", "Default Cat"));
     auto variants = Json::ensureArray(root, "variants", QJsonArray(), "Catpack Variants");
     for (auto v : variants) {
         auto variant = Json::ensureObject(v, QJsonObject(), "Cat variant");
@@ -99,19 +102,39 @@ QDate ensureDay(int year, int month, int day)
 
 QString JsonCatPack::path()
 {
-    const QDate now = QDate::currentDate();
+    return path(QDate::currentDate());
+}
+
+QString JsonCatPack::path(QDate now)
+{
     for (auto var : m_variants) {
         QDate startDate = ensureDay(now.year(), var.startTime.month, var.startTime.day);
         QDate endDate = ensureDay(now.year(), var.endTime.month, var.endTime.day);
         if (startDate > endDate) {  // it's spans over multiple years
-            if (endDate <= now)     // end date is in the past so jump one year into the future for endDate
+            if (endDate < now)      // end date is in the past so jump one year into the future for endDate
                 endDate = endDate.addYears(1);
             else  // end date is in the future so jump one year into the past for startDate
                 startDate = startDate.addYears(-1);
         }
 
-        if (startDate >= now && now >= endDate)
+        if (startDate <= now && now <= endDate)
             return var.path;
     }
-    return m_defaultPath;
+    auto dInfo = QFileInfo(m_default_path);
+    if (!dInfo.isDir())
+        return m_default_path;
+
+    QStringList supportedImageFormats;
+    for (auto format : QImageReader::supportedImageFormats()) {
+        supportedImageFormats.append("*." + format);
+    }
+
+    auto files = QDir(m_default_path).entryInfoList(supportedImageFormats, QDir::Files, QDir::Name);
+    if (files.length() == 0)
+        return "";
+    auto idx = (now.dayOfYear() - 1) % files.length();
+    auto isRandom = dInfo.fileName().compare("random", Qt::CaseInsensitive) == 0;
+    if (isRandom)
+        idx = QRandomGenerator::global()->bounded(0, files.length());
+    return files[idx].absoluteFilePath();
 }

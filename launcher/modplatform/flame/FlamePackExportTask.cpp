@@ -26,7 +26,9 @@
 #include <QMessageBox>
 #include <QtConcurrentRun>
 #include <algorithm>
+#include <iterator>
 #include <memory>
+#include "Application.h"
 #include "Json.h"
 #include "MMCZip.h"
 #include "minecraft/PackProfile.h"
@@ -42,12 +44,14 @@ const QStringList FlamePackExportTask::FILE_EXTENSIONS({ "jar", "zip" });
 FlamePackExportTask::FlamePackExportTask(const QString& name,
                                          const QString& version,
                                          const QString& author,
+                                         bool optionalFiles,
                                          InstancePtr instance,
                                          const QString& output,
                                          MMCZip::FilterFunction filter)
     : name(name)
     , version(version)
     , author(author)
+    , optionalFiles(optionalFiles)
     , instance(instance)
     , mcInstance(dynamic_cast<MinecraftInstance*>(instance.get()))
     , gameRoot(instance->gameRoot())
@@ -64,20 +68,11 @@ void FlamePackExportTask::executeTask()
 
 bool FlamePackExportTask::abort()
 {
-    if (task != nullptr) {
+    if (task) {
         task->abort();
-        task = nullptr;
         emitAborted();
         return true;
     }
-
-    if (buildZipFuture.isRunning()) {
-        buildZipFuture.cancel();
-        // NOTE: Here we don't do `emitAborted()` because it will be done when `buildZipFuture` actually cancels, which may not occur
-        // immediately.
-        return true;
-    }
-
     return false;
 }
 
@@ -108,7 +103,8 @@ void FlamePackExportTask::collectHashes()
     setStatus(tr("Finding file hashes..."));
     setProgress(1, 5);
     auto allMods = mcInstance->loaderModList()->allMods();
-    ConcurrentTask::Ptr hashingTask(new ConcurrentTask(this, "MakeHashesTask", 10));
+    ConcurrentTask::Ptr hashingTask(
+        new ConcurrentTask(this, "MakeHashesTask", APPLICATION->settings()->get("NumberOfConcurrentTasks").toInt()));
     task.reset(hashingTask);
     for (const QFileInfo& file : files) {
         const QString relative = gameRoot.relativeFilePath(file.absoluteFilePath());
@@ -120,7 +116,7 @@ void FlamePackExportTask::collectHashes()
 
         if (relative.startsWith("resourcepacks/") &&
             (relative.endsWith(".zip") || relative.endsWith(".zip.disabled"))) {  // is resourcepack
-            auto hashTask = Hashing::createFlameHasher(file.absoluteFilePath());
+            auto hashTask = Hashing::createHasher(file.absoluteFilePath(), ModPlatform::ResourceProvider::FLAME);
             connect(hashTask.get(), &Hashing::Hasher::resultsReady, [this, relative, file](QString hash) {
                 if (m_state == Task::State::Running) {
                     pendingHashes.insert(hash, { relative, file.absoluteFilePath(), relative.endsWith(".zip") });
@@ -144,7 +140,7 @@ void FlamePackExportTask::collectHashes()
                 continue;
             }
 
-            auto hashTask = Hashing::createFlameHasher(mod->fileinfo().absoluteFilePath());
+            auto hashTask = Hashing::createHasher(mod->fileinfo().absoluteFilePath(), ModPlatform::ResourceProvider::FLAME);
             connect(hashTask.get(), &Hashing::Hasher::resultsReady, [this, mod](QString hash) {
                 if (m_state == Task::State::Running) {
                     pendingHashes.insert(hash, { mod->name(), mod->fileinfo().absoluteFilePath(), mod->enabled(), true });
@@ -205,7 +201,7 @@ void FlamePackExportTask::makeApiRequest()
                        << " reason: " << parseError.errorString();
             qWarning() << *response;
 
-            failed(parseError.errorString());
+            emitFailed(parseError.errorString());
             return;
         }
 
@@ -217,6 +213,7 @@ void FlamePackExportTask::makeApiRequest()
             if (dataArr.isEmpty()) {
                 qWarning() << "No matches found for fingerprint search!";
 
+                getProjectsInfo();
                 return;
             }
             for (auto match : dataArr) {
@@ -247,9 +244,9 @@ void FlamePackExportTask::makeApiRequest()
             qDebug() << doc;
         }
         pendingHashes.clear();
+        getProjectsInfo();
     });
-    connect(task.get(), &Task::finished, this, &FlamePackExportTask::getProjectsInfo);
-    connect(task.get(), &NetJob::failed, this, &FlamePackExportTask::emitFailed);
+    connect(task.get(), &Task::failed, this, &FlamePackExportTask::getProjectsInfo);
     task->start();
 }
 
@@ -283,7 +280,7 @@ void FlamePackExportTask::getProjectsInfo()
             qWarning() << "Error while parsing JSON response from CurseForge projects task at " << parseError.offset
                        << " reason: " << parseError.errorString();
             qWarning() << *response;
-            failed(parseError.errorString());
+            emitFailed(parseError.errorString());
             return;
         }
 
@@ -327,6 +324,7 @@ void FlamePackExportTask::getProjectsInfo()
         }
         buildZip();
     });
+    connect(projTask.get(), &Task::failed, this, &FlamePackExportTask::emitFailed);
     task.reset(projTask);
     task->start();
 }
@@ -336,89 +334,40 @@ void FlamePackExportTask::buildZip()
     setStatus(tr("Adding files..."));
     setProgress(4, 5);
 
-    buildZipFuture = QtConcurrent::run(QThreadPool::globalInstance(), [this]() {
-        QuaZip zip(output);
-        if (!zip.open(QuaZip::mdCreate)) {
-            QFile::remove(output);
-            return BuildZipResult(tr("Could not create file"));
-        }
+    auto zipTask = makeShared<MMCZip::ExportToZipTask>(output, gameRoot, files, "overrides/", true, false);
+    zipTask->addExtraFile("manifest.json", generateIndex());
+    zipTask->addExtraFile("modlist.html", generateHTML());
 
-        if (buildZipFuture.isCanceled())
-            return BuildZipResult();
+    QStringList exclude;
+    std::transform(resolvedFiles.keyBegin(), resolvedFiles.keyEnd(), std::back_insert_iterator(exclude),
+                   [this](QString file) { return gameRoot.relativeFilePath(file); });
+    zipTask->setExcludeFiles(exclude);
 
-        QuaZipFile indexFile(&zip);
-        if (!indexFile.open(QIODevice::WriteOnly, QuaZipNewInfo("manifest.json"))) {
-            QFile::remove(output);
-            return BuildZipResult(tr("Could not create index"));
-        }
-        indexFile.write(generateIndex());
-
-        QuaZipFile modlist(&zip);
-        if (!modlist.open(QIODevice::WriteOnly, QuaZipNewInfo("modlist.html"))) {
-            QFile::remove(output);
-            return BuildZipResult(tr("Could not create index"));
-        }
-        QString content = "";
-        for (auto mod : resolvedFiles) {
-            if (mod.isMod) {
-                content += QString(TEMPLATE)
-                               .replace("{name}", mod.name.toHtmlEscaped())
-                               .replace("{url}", ModPlatform::getMetaURL(ModPlatform::ResourceProvider::FLAME, mod.addonId).toHtmlEscaped())
-                               .replace("{authors}", !mod.authors.isEmpty() ? QString(" (by %1)").arg(mod.authors).toHtmlEscaped() : "");
-            }
-        }
-        content = "<ul>" + content + "</ul>";
-        modlist.write(content.toUtf8());
-
-        auto progressStep = std::make_shared<TaskStepProgress>();
-
-        size_t progress = 0;
-        for (const QFileInfo& file : files) {
-            if (buildZipFuture.isCanceled()) {
-                QFile::remove(output);
-                progressStep->state = TaskStepState::Failed;
-                stepProgress(*progressStep);
-                return BuildZipResult();
-            }
-            progressStep->update(progress, files.length());
-            stepProgress(*progressStep);
-
-            const QString relative = gameRoot.relativeFilePath(file.absoluteFilePath());
-            if (!resolvedFiles.contains(file.absoluteFilePath()) &&
-                !JlCompress::compressFile(&zip, file.absoluteFilePath(), "overrides/" + relative)) {
-                QFile::remove(output);
-                return BuildZipResult(tr("Could not read and compress %1").arg(relative));
-            }
-            progress++;
-        }
-
-        zip.close();
-
-        if (zip.getZipError() != 0) {
-            QFile::remove(output);
-            progressStep->state = TaskStepState::Failed;
-            stepProgress(*progressStep);
-            return BuildZipResult(tr("A zip error occurred"));
-        }
+    auto progressStep = std::make_shared<TaskStepProgress>();
+    connect(zipTask.get(), &Task::finished, this, [this, progressStep] {
         progressStep->state = TaskStepState::Succeeded;
         stepProgress(*progressStep);
-        return BuildZipResult();
     });
-    connect(&buildZipWatcher, &QFutureWatcher<BuildZipResult>::finished, this, &FlamePackExportTask::finish);
-    buildZipWatcher.setFuture(buildZipFuture);
-}
 
-void FlamePackExportTask::finish()
-{
-    if (buildZipFuture.isCanceled())
-        emitAborted();
-    else {
-        const BuildZipResult result = buildZipFuture.result();
-        if (result.has_value())
-            emitFailed(result.value());
-        else
-            emitSucceeded();
-    }
+    connect(zipTask.get(), &Task::succeeded, this, &FlamePackExportTask::emitSucceeded);
+    connect(zipTask.get(), &Task::aborted, this, &FlamePackExportTask::emitAborted);
+    connect(zipTask.get(), &Task::failed, this, [this, progressStep](QString reason) {
+        progressStep->state = TaskStepState::Failed;
+        stepProgress(*progressStep);
+        emitFailed(reason);
+    });
+    connect(zipTask.get(), &Task::stepProgress, this, &FlamePackExportTask::propagateStepProgress);
+
+    connect(zipTask.get(), &Task::progress, this, [this, progressStep](qint64 current, qint64 total) {
+        progressStep->update(current, total);
+        stepProgress(*progressStep);
+    });
+    connect(zipTask.get(), &Task::status, this, [this, progressStep](QString status) {
+        progressStep->status = status;
+        stepProgress(*progressStep);
+    });
+    task.reset(zipTask);
+    zipTask->start();
 }
 
 QByteArray FlamePackExportTask::generateIndex()
@@ -438,17 +387,24 @@ QByteArray FlamePackExportTask::generateIndex()
         const ComponentPtr quilt = profile->getComponent("org.quiltmc.quilt-loader");
         const ComponentPtr fabric = profile->getComponent("net.fabricmc.fabric-loader");
         const ComponentPtr forge = profile->getComponent("net.minecraftforge");
+        const ComponentPtr neoforge = profile->getComponent("net.neoforged");
 
         // convert all available components to mrpack dependencies
         if (minecraft != nullptr)
             version["version"] = minecraft->m_version;
         QString id;
         if (quilt != nullptr)
-            id = "quilt-" + quilt->getVersion();
+            id = "quilt-" + quilt->m_version;
         else if (fabric != nullptr)
-            id = "fabric-" + fabric->getVersion();
+            id = "fabric-" + fabric->m_version;
         else if (forge != nullptr)
-            id = "forge-" + forge->getVersion();
+            id = "forge-" + forge->m_version;
+        else if (neoforge != nullptr) {
+            id = "neoforge-";
+            if (minecraft->m_version == "1.20.1")
+                id += "1.20.1-";
+            id += neoforge->m_version;
+        }
         version["modLoaders"] = QJsonArray();
         if (!id.isEmpty()) {
             QJsonObject loader;
@@ -464,10 +420,25 @@ QByteArray FlamePackExportTask::generateIndex()
         QJsonObject file;
         file["projectID"] = mod.addonId;
         file["fileID"] = mod.version;
-        file["required"] = mod.enabled;
+        file["required"] = mod.enabled || !optionalFiles;
         files << file;
     }
     obj["files"] = files;
 
     return QJsonDocument(obj).toJson(QJsonDocument::Compact);
+}
+
+QByteArray FlamePackExportTask::generateHTML()
+{
+    QString content = "";
+    for (auto mod : resolvedFiles) {
+        if (mod.isMod) {
+            content += QString(TEMPLATE)
+                           .replace("{name}", mod.name.toHtmlEscaped())
+                           .replace("{url}", ModPlatform::getMetaURL(ModPlatform::ResourceProvider::FLAME, mod.addonId).toHtmlEscaped())
+                           .replace("{authors}", !mod.authors.isEmpty() ? QString(" (by %1)").arg(mod.authors).toHtmlEscaped() : "");
+        }
+    }
+    content = "<ul>" + content + "</ul>";
+    return content.toUtf8();
 }

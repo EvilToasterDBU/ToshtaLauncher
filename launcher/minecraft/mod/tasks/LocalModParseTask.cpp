@@ -1,9 +1,9 @@
 #include "LocalModParseTask.h"
 
+#include <qdcss.h>
 #include <quazip/quazip.h>
 #include <quazip/quazipfile.h>
 #include <toml++/toml.h>
-#include <qdcss.h>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -104,14 +104,15 @@ ModDetails ReadMCModTOML(QByteArray contents)
 #if TOML_EXCEPTIONS
     try {
         tomlData = toml::parse(contents.toStdString());
-    } catch (const toml::parse_error& err) {
+    } catch ([[maybe_unused]] const toml::parse_error& err) {
         return {};
     }
 #else
-    tomlData = toml::parse(contents.toStdString());
-    if (!tomlData) {
+    toml::parse_result result = toml::parse(contents.toStdString());
+    if (!result) {
         return {};
     }
+    tomlData = result.table();
 #endif
 
     // array defined by [[mods]]
@@ -151,8 +152,8 @@ ModDetails ReadMCModTOML(QByteArray contents)
     QString authors = "";
     if (auto authorsDatum = tomlData["authors"].as_string()) {
         authors = QString::fromStdString(authorsDatum->get());
-    } else if (auto authorsDatum = (*modsTable)["authors"].as_string()) {
-        authors = QString::fromStdString(authorsDatum->get());
+    } else if (auto authorsDatumMods = (*modsTable)["authors"].as_string()) {
+        authors = QString::fromStdString(authorsDatumMods->get());
     }
     if (!authors.isEmpty()) {
         details.authors.append(authors);
@@ -161,8 +162,8 @@ ModDetails ReadMCModTOML(QByteArray contents)
     QString homeurl = "";
     if (auto homeurlDatum = tomlData["displayURL"].as_string()) {
         homeurl = QString::fromStdString(homeurlDatum->get());
-    } else if (auto homeurlDatum = (*modsTable)["displayURL"].as_string()) {
-        homeurl = QString::fromStdString(homeurlDatum->get());
+    } else if (auto homeurlDatumMods = (*modsTable)["displayURL"].as_string()) {
+        homeurl = QString::fromStdString(homeurlDatumMods->get());
     }
     // fix up url.
     if (!homeurl.isEmpty() && !homeurl.startsWith("http://") && !homeurl.startsWith("https://") && !homeurl.startsWith("ftp://")) {
@@ -173,16 +174,16 @@ ModDetails ReadMCModTOML(QByteArray contents)
     QString issueTrackerURL = "";
     if (auto issueTrackerURLDatum = tomlData["issueTrackerURL"].as_string()) {
         issueTrackerURL = QString::fromStdString(issueTrackerURLDatum->get());
-    } else if (auto issueTrackerURLDatum = (*modsTable)["issueTrackerURL"].as_string()) {
-        issueTrackerURL = QString::fromStdString(issueTrackerURLDatum->get());
+    } else if (auto issueTrackerURLDatumMods = (*modsTable)["issueTrackerURL"].as_string()) {
+        issueTrackerURL = QString::fromStdString(issueTrackerURLDatumMods->get());
     }
     details.issue_tracker = issueTrackerURL;
 
     QString license = "";
     if (auto licenseDatum = tomlData["license"].as_string()) {
         license = QString::fromStdString(licenseDatum->get());
-    } else if (auto licenseDatum =(*modsTable)["license"].as_string()) {
-        license = QString::fromStdString(licenseDatum->get());
+    } else if (auto licenseDatumMods = (*modsTable)["license"].as_string()) {
+        license = QString::fromStdString(licenseDatumMods->get());
     }
     if (!license.isEmpty())
         details.licenses.append(ModLicense(license));
@@ -190,8 +191,8 @@ ModDetails ReadMCModTOML(QByteArray contents)
     QString logoFile = "";
     if (auto logoFileDatum = tomlData["logoFile"].as_string()) {
         logoFile = QString::fromStdString(logoFileDatum->get());
-    } else if (auto logoFileDatum =(*modsTable)["logoFile"].as_string()) {
-        logoFile = QString::fromStdString(logoFileDatum->get());
+    } else if (auto logoFileDatumMods = (*modsTable)["logoFile"].as_string()) {
+        logoFile = QString::fromStdString(logoFileDatumMods->get());
     }
     details.icon_file = logoFile;
 
@@ -271,7 +272,7 @@ ModDetails ReadFabricModInfo(QByteArray contents)
                 if (largest > 0) {
                     auto key = QString::number(largest) + "x" + QString::number(largest);
                     details.icon_file = obj.value(key).toString();
-                } else { // parsing the sizes failed
+                } else {  // parsing the sizes failed
                     // take the first
                     for (auto i : obj) {
                         details.icon_file = i.toString();
@@ -358,7 +359,7 @@ ModDetails ReadQuiltModInfo(QByteArray contents)
                 if (largest > 0) {
                     auto key = QString::number(largest) + "x" + QString::number(largest);
                     details.icon_file = obj.value(key).toString();
-                } else { // parsing the sizes failed
+                } else {  // parsing the sizes failed
                     // take the first
                     for (auto i : obj) {
                         details.icon_file = i.toString();
@@ -369,12 +370,11 @@ ModDetails ReadQuiltModInfo(QByteArray contents)
                 details.icon_file = icon.toString();
             }
         }
-
     }
     return details;
 }
 
-ModDetails ReadForgeInfo(QString fileName)
+ModDetails ReadForgeInfo(QByteArray contents)
 {
     ModDetails details;
     // Read the data
@@ -382,7 +382,7 @@ ModDetails ReadForgeInfo(QString fileName)
     details.mod_id = "Forge";
     details.homeurl = "http://www.minecraftforge.net/forum/";
     INIFile ini;
-    if (!ini.loadFile(fileName))
+    if (!ini.loadFile(contents))
         return details;
 
     QString major = ini.get("forge.major.number", "0").toString();
@@ -459,7 +459,7 @@ bool process(Mod& mod, ProcessingLevel level)
     }
 }
 
-bool processZIP(Mod& mod, ProcessingLevel level)
+bool processZIP(Mod& mod, [[maybe_unused]] ProcessingLevel level)
 {
     ModDetails details;
 
@@ -469,7 +469,7 @@ bool processZIP(Mod& mod, ProcessingLevel level)
 
     QuaZipFile file(&zip);
 
-    if (zip.setCurrentFile("META-INF/mods.toml")) {
+    if (zip.setCurrentFile("META-INF/mods.toml") || zip.setCurrentFile("META-INF/neoforge.mods.toml")) {
         if (!file.open(QIODevice::ReadOnly)) {
             zip.close();
             return false;
@@ -554,7 +554,7 @@ bool processZIP(Mod& mod, ProcessingLevel level)
             return false;
         }
 
-        details = ReadForgeInfo(file.getFileName());
+        details = ReadForgeInfo(file.readAll());
         file.close();
         zip.close();
 
@@ -592,7 +592,7 @@ bool processZIP(Mod& mod, ProcessingLevel level)
     return false;  // no valid mod found in archive
 }
 
-bool processFolder(Mod& mod, ProcessingLevel level)
+bool processFolder(Mod& mod, [[maybe_unused]] ProcessingLevel level)
 {
     ModDetails details;
 
@@ -613,7 +613,7 @@ bool processFolder(Mod& mod, ProcessingLevel level)
     return false;  // no valid mcmod.info file found
 }
 
-bool processLitemod(Mod& mod, ProcessingLevel level)
+bool processLitemod(Mod& mod, [[maybe_unused]] ProcessingLevel level)
 {
     ModDetails details;
 
@@ -647,11 +647,11 @@ bool validate(QFileInfo file)
     return ModUtils::process(mod, ProcessingLevel::BasicInfoOnly) && mod.valid();
 }
 
-bool processIconPNG(const Mod& mod, QByteArray&& raw_data)
+bool processIconPNG(const Mod& mod, QByteArray&& raw_data, QPixmap* pixmap)
 {
     auto img = QImage::fromData(raw_data);
     if (!img.isNull()) {
-        mod.setIcon(img);
+        *pixmap = mod.setIcon(img);
     } else {
         qWarning() << "Failed to parse mod logo:" << mod.iconPath() << "from" << mod.name();
         return false;
@@ -659,41 +659,43 @@ bool processIconPNG(const Mod& mod, QByteArray&& raw_data)
     return true;
 }
 
-bool loadIconFile(const Mod& mod) {
+bool loadIconFile(const Mod& mod, QPixmap* pixmap)
+{
     if (mod.iconPath().isEmpty()) {
         qWarning() << "No Iconfile set, be sure to parse the mod first";
         return false;
     }
 
-    auto png_invalid = [&mod]() {
-        qWarning() << "Mod at" << mod.fileinfo().filePath() << "does not have a valid icon";
+    auto png_invalid = [&mod](const QString& reason) {
+        qWarning() << "Mod at" << mod.fileinfo().filePath() << "does not have a valid icon:" << reason;
         return false;
     };
 
     switch (mod.type()) {
-        case ResourceType::FOLDER:
-        {
+        case ResourceType::FOLDER: {
             QFileInfo icon_info(FS::PathCombine(mod.fileinfo().filePath(), mod.iconPath()));
             if (icon_info.exists() && icon_info.isFile()) {
                 QFile icon(icon_info.filePath());
-                if (!icon.open(QIODevice::ReadOnly))
-                    return false;
+                if (!icon.open(QIODevice::ReadOnly)) {
+                    return png_invalid("failed  to open file " + icon_info.filePath());
+                }
                 auto data = icon.readAll();
-                
-                bool icon_result = ModUtils::processIconPNG(mod, std::move(data));
+
+                bool icon_result = ModUtils::processIconPNG(mod, std::move(data), pixmap);
 
                 icon.close();
 
                 if (!icon_result) {
-                    return png_invalid();  // icon invalid
+                    return png_invalid("invalid png image");  // icon invalid
                 }
+                return true;
             }
+            return png_invalid("file '" + icon_info.filePath() + "' does not exists or is not a file");
         }
-        case ResourceType::ZIPFILE:
-        {
+        case ResourceType::ZIPFILE: {
             QuaZip zip(mod.fileinfo().filePath());
             if (!zip.open(QuaZip::mdUnzip))
-                return false;
+                return png_invalid("failed to open '" + mod.fileinfo().filePath() + "' as a zip archive");
 
             QuaZipFile file(&zip);
 
@@ -701,28 +703,27 @@ bool loadIconFile(const Mod& mod) {
                 if (!file.open(QIODevice::ReadOnly)) {
                     qCritical() << "Failed to open file in zip.";
                     zip.close();
-                    return png_invalid();
+                    return png_invalid("Failed to open '" + mod.iconPath() + "' in zip archive");
                 }
 
                 auto data = file.readAll();
 
-                bool icon_result = ModUtils::processIconPNG(mod, std::move(data));
+                bool icon_result = ModUtils::processIconPNG(mod, std::move(data), pixmap);
 
                 file.close();
                 if (!icon_result) {
-                    return png_invalid();  // icon png invalid
+                    return png_invalid("invalid png image");  // icon png invalid
                 }
-            } else {
-                return png_invalid();  // could not set icon as current file.
+                return true;
             }
+            return png_invalid("Failed to set '" + mod.iconPath() +
+                               "' as current file in zip archive");  // could not set icon as current file.
         }
-        case ResourceType::LITEMOD:
-        {
-            return false; // can lightmods even have icons?
+        case ResourceType::LITEMOD: {
+            return png_invalid("litemods do not have icons");  // can lightmods even have icons?
         }
         default:
-            qWarning() << "Invalid type for mod, can not load icon.";
-            return false;
+            return png_invalid("Invalid type for mod, can not load icon.");
     }
 }
 
@@ -746,7 +747,7 @@ void LocalModParseTask::executeTask()
     m_result->details = mod.details();
 
     if (m_aborted)
-        emit finished();
+        emitAborted();
     else
         emitSucceeded();
 }

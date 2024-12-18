@@ -44,14 +44,14 @@ class ResourcePack : public Resource {
 
     bool valid() const override;
 
-    [[nodiscard]] auto compare(Resource const& other, SortType type) const -> std::pair<int, bool> override;
+    [[nodiscard]] int compare(Resource const& other, SortType type) const override;
     [[nodiscard]] bool applyFilter(QRegularExpression filter) const override;
 
    protected:
     mutable QMutex m_data_lock;
 
     /* The 'version' of a resource pack, as defined in the pack.mcmeta file.
-     * See https://minecraft.fandom.com/wiki/Tutorials/Creating_a_resource_pack#Formatting_pack.mcmeta
+     * See https://minecraft.wiki/w/Tutorials/Creating_a_resource_pack#Formatting_pack.mcmeta
      */
     int m_pack_format = 0;
 

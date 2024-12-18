@@ -18,6 +18,7 @@
 
 #include "ModrinthPackExportTask.h"
 
+#include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QFileInfo>
 #include <QMessageBox>
@@ -25,7 +26,10 @@
 #include "Json.h"
 #include "MMCZip.h"
 #include "minecraft/PackProfile.h"
+#include "minecraft/mod/MetadataHandler.h"
 #include "minecraft/mod/ModFolderModel.h"
+#include "modplatform/helpers/HashUtils.h"
+#include "tasks/Task.h"
 
 const QStringList ModrinthPackExportTask::PREFIXES({ "mods/", "coremods/", "resourcepacks/", "texturepacks/", "shaderpacks/" });
 const QStringList ModrinthPackExportTask::FILE_EXTENSIONS({ "jar", "litemod", "zip" });
@@ -33,12 +37,14 @@ const QStringList ModrinthPackExportTask::FILE_EXTENSIONS({ "jar", "litemod", "z
 ModrinthPackExportTask::ModrinthPackExportTask(const QString& name,
                                                const QString& version,
                                                const QString& summary,
+                                               bool optionalFiles,
                                                InstancePtr instance,
                                                const QString& output,
                                                MMCZip::FilterFunction filter)
     : name(name)
     , version(version)
     , summary(summary)
+    , optionalFiles(optionalFiles)
     , instance(instance)
     , mcInstance(dynamic_cast<MinecraftInstance*>(instance.get()))
     , gameRoot(instance->gameRoot())
@@ -55,20 +61,11 @@ void ModrinthPackExportTask::executeTask()
 
 bool ModrinthPackExportTask::abort()
 {
-    if (task != nullptr) {
+    if (task) {
         task->abort();
-        task = nullptr;
         emitAborted();
         return true;
     }
-
-    if (buildZipFuture.isRunning()) {
-        buildZipFuture.cancel();
-        // NOTE: Here we don't do `emitAborted()` because it will be done when `buildZipFuture` actually cancels, which may not occur
-        // immediately.
-        return true;
-    }
-
     return false;
 }
 
@@ -108,8 +105,6 @@ void ModrinthPackExportTask::collectHashes()
             }))
             continue;
 
-        QCryptographicHash sha512(QCryptographicHash::Algorithm::Sha512);
-
         QFile openFile(file.absoluteFilePath());
         if (!openFile.open(QFile::ReadOnly)) {
             qWarning() << "Could not open" << file << "for hashing";
@@ -121,7 +116,7 @@ void ModrinthPackExportTask::collectHashes()
             qWarning() << "Could not read" << file;
             continue;
         }
-        sha512.addData(data);
+        auto sha512 = Hashing::hash(data, Hashing::Algorithm::Sha512);
 
         auto allMods = mcInstance->loaderModList()->allMods();
         if (auto modIter = std::find_if(allMods.begin(), allMods.end(), [&file](Mod* mod) { return mod->fileinfo() == file; });
@@ -133,10 +128,9 @@ void ModrinthPackExportTask::collectHashes()
                 if (!url.isEmpty() && BuildConfig.MODRINTH_MRPACK_HOSTS.contains(url.host())) {
                     qDebug() << "Resolving" << relative << "from index";
 
-                    QCryptographicHash sha1(QCryptographicHash::Algorithm::Sha1);
-                    sha1.addData(data);
+                    auto sha1 = Hashing::hash(data, Hashing::Algorithm::Sha1);
 
-                    ResolvedFile resolvedFile{ sha1.result().toHex(), sha512.result().toHex(), url.toEncoded(), openFile.size() };
+                    ResolvedFile resolvedFile{ sha1, sha512, url.toEncoded(), openFile.size(), mod->metadata()->side };
                     resolvedFiles[relative] = resolvedFile;
 
                     // nice! we've managed to resolve based on local metadata!
@@ -147,7 +141,7 @@ void ModrinthPackExportTask::collectHashes()
         }
 
         qDebug() << "Enqueueing" << relative << "for Modrinth query";
-        pendingHashes[relative] = sha512.result().toHex();
+        pendingHashes[relative] = sha512;
     }
 
     setAbortable(true);
@@ -162,8 +156,8 @@ void ModrinthPackExportTask::makeApiRequest()
         setStatus(tr("Finding versions for hashes..."));
         auto response = std::make_shared<QByteArray>();
         task = api.currentVersions(pendingHashes.values(), "sha512", response);
-        connect(task.get(), &NetJob::succeeded, [this, response]() { parseApiResponse(response); });
-        connect(task.get(), &NetJob::failed, this, &ModrinthPackExportTask::emitFailed);
+        connect(task.get(), &Task::succeeded, [this, response]() { parseApiResponse(response); });
+        connect(task.get(), &Task::failed, this, &ModrinthPackExportTask::emitFailed);
         task->start();
     }
 }
@@ -183,10 +177,10 @@ void ModrinthPackExportTask::parseApiResponse(const std::shared_ptr<QByteArray> 
             if (obj.isEmpty())
                 continue;
 
-            const QJsonArray files = obj["files"].toArray();
-            if (auto fileIter = std::find_if(files.begin(), files.end(),
+            const QJsonArray files_array = obj["files"].toArray();
+            if (auto fileIter = std::find_if(files_array.begin(), files_array.end(),
                                              [&iterator](const QJsonValue& file) { return file["hashes"]["sha512"] == iterator.value(); });
-                fileIter != files.end()) {
+                fileIter != files_array.end()) {
                 // map the file to the url
                 resolvedFiles[iterator.key()] =
                     ResolvedFile{ fileIter->toObject()["hashes"].toObject()["sha1"].toString(), iterator.value(),
@@ -205,63 +199,36 @@ void ModrinthPackExportTask::buildZip()
 {
     setStatus(tr("Adding files..."));
 
-    buildZipFuture = QtConcurrent::run(QThreadPool::globalInstance(), [this]() {
-        QuaZip zip(output);
-        if (!zip.open(QuaZip::mdCreate)) {
-            QFile::remove(output);
-            return BuildZipResult(tr("Could not create file"));
-        }
+    auto zipTask = makeShared<MMCZip::ExportToZipTask>(output, gameRoot, files, "overrides/", true, true);
+    zipTask->addExtraFile("modrinth.index.json", generateIndex());
 
-        if (buildZipFuture.isCanceled())
-            return BuildZipResult();
+    zipTask->setExcludeFiles(resolvedFiles.keys());
 
-        QuaZipFile indexFile(&zip);
-        if (!indexFile.open(QIODevice::WriteOnly, QuaZipNewInfo("modrinth.index.json"))) {
-            QFile::remove(output);
-            return BuildZipResult(tr("Could not create index"));
-        }
-        indexFile.write(generateIndex());
-
-        size_t progress = 0;
-        for (const QFileInfo& file : files) {
-            if (buildZipFuture.isCanceled()) {
-                QFile::remove(output);
-                return BuildZipResult();
-            }
-
-            setProgress(progress, files.length());
-            const QString relative = gameRoot.relativeFilePath(file.absoluteFilePath());
-            if (!resolvedFiles.contains(relative) && !JlCompress::compressFile(&zip, file.absoluteFilePath(), "overrides/" + relative)) {
-                QFile::remove(output);
-                return BuildZipResult(tr("Could not read and compress %1").arg(relative));
-            }
-            progress++;
-        }
-
-        zip.close();
-
-        if (zip.getZipError() != 0) {
-            QFile::remove(output);
-            return BuildZipResult(tr("A zip error occurred"));
-        }
-
-        return BuildZipResult();
+    auto progressStep = std::make_shared<TaskStepProgress>();
+    connect(zipTask.get(), &Task::finished, this, [this, progressStep] {
+        progressStep->state = TaskStepState::Succeeded;
+        stepProgress(*progressStep);
     });
-    connect(&buildZipWatcher, &QFutureWatcher<BuildZipResult>::finished, this, &ModrinthPackExportTask::finish);
-    buildZipWatcher.setFuture(buildZipFuture);
-}
 
-void ModrinthPackExportTask::finish()
-{
-    if (buildZipFuture.isCanceled())
-        emitAborted();
-    else {
-        const BuildZipResult result = buildZipFuture.result();
-        if (result.has_value())
-            emitFailed(result.value());
-        else
-            emitSucceeded();
-    }
+    connect(zipTask.get(), &Task::succeeded, this, &ModrinthPackExportTask::emitSucceeded);
+    connect(zipTask.get(), &Task::aborted, this, &ModrinthPackExportTask::emitAborted);
+    connect(zipTask.get(), &Task::failed, this, [this, progressStep](QString reason) {
+        progressStep->state = TaskStepState::Failed;
+        stepProgress(*progressStep);
+        emitFailed(reason);
+    });
+    connect(zipTask.get(), &Task::stepProgress, this, &ModrinthPackExportTask::propagateStepProgress);
+
+    connect(zipTask.get(), &Task::progress, this, [this, progressStep](qint64 current, qint64 total) {
+        progressStep->update(current, total);
+        stepProgress(*progressStep);
+    });
+    connect(zipTask.get(), &Task::status, this, [this, progressStep](QString status) {
+        progressStep->status = status;
+        stepProgress(*progressStep);
+    });
+    task.reset(zipTask);
+    zipTask->start();
 }
 
 QByteArray ModrinthPackExportTask::generateIndex()
@@ -281,6 +248,7 @@ QByteArray ModrinthPackExportTask::generateIndex()
         const ComponentPtr quilt = profile->getComponent("org.quiltmc.quilt-loader");
         const ComponentPtr fabric = profile->getComponent("net.fabricmc.fabric-loader");
         const ComponentPtr forge = profile->getComponent("net.minecraftforge");
+        const ComponentPtr neoForge = profile->getComponent("net.neoforged");
 
         // convert all available components to mrpack dependencies
         QJsonObject dependencies;
@@ -292,6 +260,8 @@ QByteArray ModrinthPackExportTask::generateIndex()
             dependencies["fabric-loader"] = fabric->m_version;
         if (forge != nullptr)
             dependencies["forge"] = forge->m_version;
+        if (neoForge != nullptr)
+            dependencies["neoforge"] = neoForge->m_version;
 
         out["dependencies"] = dependencies;
     }
@@ -303,20 +273,29 @@ QByteArray ModrinthPackExportTask::generateIndex()
         QString path = iterator.key();
         const ResolvedFile& value = iterator.value();
 
+        QJsonObject env;
+
         // detect disabled mod
         const QFileInfo pathInfo(path);
-        if (pathInfo.suffix() == "disabled") {
+        if (optionalFiles && pathInfo.suffix() == "disabled") {
             // rename it
             path = pathInfo.dir().filePath(pathInfo.completeBaseName());
-            // ...and make it optional
-            QJsonObject env;
             env["client"] = "optional";
             env["server"] = "optional";
-            fileOut["env"] = env;
+        } else {
+            env["client"] = "required";
+            env["server"] = "required";
         }
 
+        // a server side mod does not imply that the mod does not work on the client
+        // however, if a mrpack mod is marked as server-only it will not install on the client
+        if (iterator->side == Metadata::ModSide::ClientSide)
+            env["server"] = "unsupported";
+
+        fileOut["env"] = env;
+
         fileOut["path"] = path;
-        fileOut["downloads"] = QJsonArray{ iterator.value().url };
+        fileOut["downloads"] = QJsonArray{ iterator->url };
 
         QJsonObject hashes;
         hashes["sha1"] = value.sha1;
