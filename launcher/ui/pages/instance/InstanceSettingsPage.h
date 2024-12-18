@@ -77,6 +77,9 @@ class InstanceSettingsPage : public QWidget, public BasePage {
     void onUseNativeGLFWChanged(bool checked);
     void onUseNativeOpenALChanged(bool checked);
 
+    void onUseNativeGLFWChanged(bool checked);
+    void onUseNativeOpenALChanged(bool checked);
+
     void applySettings();
     void loadSettings();
 

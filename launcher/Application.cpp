@@ -1159,6 +1159,26 @@ QString Application::updaterBinaryName()
     return exe_name;
 }
 
+bool Application::updaterEnabled()
+{
+#if defined(Q_OS_MAC)
+    return BuildConfig.UPDATER_ENABLED;
+#else
+    return BuildConfig.UPDATER_ENABLED && QFileInfo(FS::PathCombine(m_rootPath, updaterBinaryName())).isFile();
+#endif
+}
+
+QString Application::updaterBinaryName()
+{
+    auto exe_name = QStringLiteral("%1_updater").arg(BuildConfig.LAUNCHER_APP_BINARY_NAME);
+#if defined Q_OS_WIN32
+    exe_name.append(".exe");
+#else
+    exe_name.prepend("bin/");
+#endif
+    return exe_name;
+}
+
 bool Application::event(QEvent* event)
 {
 #ifdef Q_OS_MACOS

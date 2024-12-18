@@ -203,10 +203,7 @@ class ResourceFolderModelTest : public QObject {
 
         QCOMPARE(model.size(), 0);
 
-        {
-            EXEC_UPDATE_TASK(model.installResource(folder_resource), QVERIFY)
-        }
-        {
+        { EXEC_UPDATE_TASK(model.installResource(folder_resource), QVERIFY) } {
             EXEC_UPDATE_TASK(model.installResource(file_mod), QVERIFY)
         }
 

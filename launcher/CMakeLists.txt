@@ -608,7 +608,6 @@ set(PRISMUPDATER_SOURCES
     updater/prismupdater/UpdaterDialogs.cpp
     updater/prismupdater/GitHubRelease.h
     updater/prismupdater/GitHubRelease.cpp
-
     Json.h
     Json.cpp
     FileSystem.h
@@ -625,7 +624,6 @@ set(PRISMUPDATER_SOURCES
     # Zip
     MMCZip.h
     MMCZip.cpp
-
     # Time
     MMCTime.h
     MMCTime.cpp
@@ -1372,7 +1370,6 @@ if(Launcher_BUILD_UPDATER)
     add_executable("${Launcher_Name}_updater" WIN32 updater/prismupdater/updater_main.cpp)
     target_sources("${Launcher_Name}_updater" PRIVATE updater/prismupdater/updater.exe.manifest)
     target_link_libraries("${Launcher_Name}_updater" prism_updater_logic)
-
     if(DEFINED Launcher_APP_BINARY_NAME)
         set_target_properties("${Launcher_Name}_updater" PROPERTIES OUTPUT_NAME "${Launcher_APP_BINARY_NAME}_updater")
     endif()
